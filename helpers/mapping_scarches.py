@@ -276,16 +276,17 @@ def train_scarches(adata,
                         adata.obs[cond_key] = adata.obs[col_batch].copy()
     
     _prepare_query_anndata(adata, vae)
-    import scarches
     if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
         vae_q = model.load_query_data(adata, vae)
-    elif isinstance(vae, scarches.models.scpoli.scPoli):
-        # scPoli's load_query_data defaults labeled_indices=None but uses it as a pandas
-        # index key, crashing with KeyError: None when cell_type_keys_ is set.
-        # Pass labeled_indices=[] to correctly signal that all query cells are unlabeled.
-        vae_q = model.load_query_data(adata, vae, labeled_indices=[])
     else:
-        raise RuntimeError('This VAE model is not yet supported')
+        import scarches
+        if isinstance(vae, scarches.models.scpoli.scPoli):
+            # scPoli's load_query_data defaults labeled_indices=None but uses it as a pandas
+            # index key, crashing with KeyError: None when cell_type_keys_ is set.
+            # Pass labeled_indices=[] to correctly signal that all query cells are unlabeled.
+            vae_q = model.load_query_data(adata, vae, labeled_indices=[])
+        else:
+            raise RuntimeError('This VAE model is not yet supported')
     
     if verbose:
         print('[PROGRESS] Fitting model...')
