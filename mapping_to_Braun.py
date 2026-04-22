@@ -16,6 +16,7 @@ from helpers.report import _fig_to_base64, _write_basic_html, _write_fancy_html
 
 from tqdm import tqdm
 
+_DEFAULT_REF = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'model_Braun')
 
 
 def generate_braun_report(adata_ref,
@@ -165,8 +166,8 @@ def cmd_interface():
         '-r', '--ref',
         type=str,
         dest='ref',
-        default='/links/groups/treutlein/USERS/zhisong_he/Work/public_datasets/Linnarsson_fetal_human_brain_atlas/preprint_cellranger/mapping_as_reference/model_Braun',
-        help='Location of the reference model directory (default: /links/groups/treutlein/USERS/zhisong_he/Work/public_datasets/Linnarsson_fetal_human_brain_atlas/preprint_cellranger/mapping_as_reference/model_Braun)',
+        default=_DEFAULT_REF,
+        help='Location of the reference model directory (default: models/model_Braun relative to this script)',
     )
     parser.add_argument(
         "-q","--query",
