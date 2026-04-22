@@ -1,4 +1,4 @@
-# map2ref: one-liner CLI for scArches and label transfer
+# map2ref: one-liner CLI for scArches and label transfer to human brain cell atlases
 This is a CLI pipeline to map query scRNA-seq data to a pretrained single-cell brain atlas reference. For each atlas, the pipeline:
 
 1. **Projects the query** into the reference latent space via scArches surgery on the pretrained VAE model (scANVI for Braun, scPoli for Siletti)
