@@ -1,20 +1,8 @@
 import warnings
 warnings.filterwarnings("ignore")
 
-import scanpy as sc
-import numpy as np
-import pandas as pd
-import scvi
 import os
 import argparse
-
-import matplotlib.pyplot as plt
-from scipy import sparse
-from helpers.mapping_scarches import train_scarches, get_latent_space
-from helpers.wknn import estimate_presence_score, transfer_labels
-from helpers.report import _fig_to_base64, _write_basic_html, _write_fancy_html
-
-from tqdm import tqdm
 
 _DEFAULT_REF = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'model_Braun')
 
@@ -275,7 +263,18 @@ def cmd_interface():
 
 if __name__ == '__main__':
     args = cmd_interface()
-    
+
+    import scanpy as sc
+    import numpy as np
+    import pandas as pd
+    import scvi
+    import matplotlib.pyplot as plt
+    from scipy import sparse
+    from helpers.mapping_scarches import train_scarches, get_latent_space
+    from helpers.wknn import estimate_presence_score, transfer_labels
+    from helpers.report import _fig_to_base64, _write_basic_html, _write_fancy_html
+    from tqdm import tqdm
+
     verbose = not args.quiet
     file_ref_adata = os.path.join(args.ref,'ref.h5ad')
     file_lat_ref = os.path.join(args.output, "lat_rep_ref.npy")
