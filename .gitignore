@@ -1,5 +1,5 @@
 # Ignore the model folders
-model_*
+models/*
 
 # Ignore Python Cache
 __pycache__
