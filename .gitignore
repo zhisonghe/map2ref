@@ -2,6 +2,9 @@
 models/*
 !models/.gitkeep
 
+# Ignore virtual environment
+.venv
+
 # Ignore Python Cache
 __pycache__
 
