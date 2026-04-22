@@ -69,6 +69,28 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
     if verbose:
         print('[PROGRESS] scArches model training...')
     vae = load_vae(adata_ref)
+
+    # ---------------------- optional query layer remapping
+    if args.query_layer is not None:
+        # detect target slot via duck-typing: SCANVI/SCVI expose adata_manager with setup_args
+        try:
+            used_layer = vae.adata_manager._registry["setup_args"]["layer"]
+        except AttributeError:
+            used_layer = None  # scPoli: always uses .X
+        if used_layer is None:
+            # model expects .X; only copy if the user pointed at a different layer
+            if args.query_layer != 'X':
+                if verbose:
+                    print(f'[PROGRESS] Copying query layer "{args.query_layer}" to .X')
+                adata_query.X = adata_query.layers[args.query_layer].copy()
+        else:
+            # model expects a named layer; only copy if the user pointed at a different source
+            if args.query_layer != used_layer:
+                src = adata_query.X if args.query_layer == 'X' else adata_query.layers[args.query_layer]
+                if verbose:
+                    print(f'[PROGRESS] Copying query layer "{args.query_layer}" to layer "{used_layer}"')
+                adata_query.layers[used_layer] = src.copy()
+
     vae_q = train_scarches(
         adata_query, adata_ref,
         vae=vae,

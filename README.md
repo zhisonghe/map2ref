@@ -104,6 +104,7 @@ python map2ref/mapping_to_Siletti.py \
 | `--output` | `-o` | `output` | Path to the output folder |
 | `--save-full-query` | | off | Save a full-gene query AnnData (alongside the gene-subset `query.h5ad`) with all mapping results |
 | `--query-batch-key` | `-b` | `batch` | Key in `adata.obs` identifying sample/batch for scArches surgery |
+| `--query-layer` | | `None` | Layer in the query AnnData to use as expression input (use `X` to refer to `.X`); by default the layer expected by the pretrained model is used |
 | `--batch-size` | | `1024` | Mini-batch size for model training |
 | `--epochs` | | `200` | Number of training epochs |
 | `--k-wknn` | `-k` | `100` | Number of nearest neighbours per query cell in the reference for WKNN construction |

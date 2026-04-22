@@ -117,6 +117,16 @@ def build_arg_parser(description, default_ref, no_lab_transfer_help):
         help='HTML report style to generate (default: basic)',
     )
     parser.add_argument(
+        '--query-layer',
+        type=str,
+        dest='query_layer',
+        default=None,
+        help='Layer in the query AnnData to use as expression input. Use "X" to refer to the .X slot. '
+             'By default the layer expected by the pretrained model is used (for SCANVI-based mapping) '
+             'or .X (for scPoli-based mapping). When specified, the given layer is copied to the '
+             'expected slot before model training.',
+    )
+    parser.add_argument(
         '--skip-scale-check',
         action='store_true',
         dest='skip_scale_check',
