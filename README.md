@@ -63,6 +63,12 @@ pixi add python=3.9
 
 ## Usage
 
+Activate the virtual environment first to ensure the correct Python is used:
+
+```bash
+source map2ref/.venv/bin/activate
+```
+
 ### Mapping to the developing human brain atlas (Braun et al. 2023)
 
 ```bash
