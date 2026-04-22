@@ -65,7 +65,7 @@ pixi add python=3.9
 ### Mapping to the developing human brain atlas (Braun et al. 2023)
 
 ```bash
-python mapping_to_Braun.py \
+python map2ref/mapping_to_Braun.py \
     -q query.h5ad \
     -o output_map2Braun \
     --save-full-query \
@@ -78,7 +78,7 @@ python mapping_to_Braun.py \
 ### Mapping to the adult human brain atlas (Siletti et al. 2023)
 
 ```bash
-python mapping_to_Siletti.py \
+python map2ref/mapping_to_Siletti.py \
     -q query.h5ad \
     -o output_map2Siletti \
     --save-full-query \
