@@ -1,0 +1,8 @@
+# Ignore the model folders
+model_*
+
+# Ignore Python Cache
+__pycache__
+
+# Ignore the test folder
+test
