@@ -341,8 +341,12 @@ def get_latent_space(adata,
         adata_full = adata.concatenate(ref_adata)
         adata_full.obs['batch'] = adata.obs["batch"].tolist() + ref_adata.obs["batch"].tolist()
     
-    lat_rep = vae.get_latent_representation(adata_full)
-    
+    import scarches
+    if isinstance(vae, scarches.models.scpoli.scPoli):
+        lat_rep = vae.get_latent(adata_full, mean=True)
+    else:
+        lat_rep = vae.get_latent_representation(adata_full)
+
     adata.obs = obs_q
     if ref_adata:
         ref_adata.obs = obs_ref
