@@ -6,10 +6,12 @@ import os
 import sys
 import argparse
 
+import anndata
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
+from scipy.sparse import csr_matrix
 import scvi
 
 def is_lognorm(mat, max_row_num=10000, max_col_num=None):
@@ -107,6 +109,86 @@ def is_lognorm(mat, max_row_num=10000, max_col_num=None):
     votes_for_log = sum([range_suggests_log, min_suggests_log, vm_suggests_log])
     return votes_for_log >= 2
     
+_MIN_VAR_NAME_RATIO = 0.8
+
+
+def _prepare_query_anndata(adata, vae):
+    """Prepare query AnnData in-place for scArches query integration.
+
+    For SCANVI/SCVI: delegates to the model class's ``prepare_query_anndata``
+    method, which pads missing genes with zeros, reorders features to match the
+    reference, and calls ``setup_anndata`` so that ``load_query_data`` can be
+    called immediately afterwards.
+
+    For scPoli: mirrors the same gene-level preparation manually (the built-in
+    ``_validate_var_names`` is only invoked when passing a *path* to
+    ``load_query_data``, not a model object) and additionally fills every
+    cell-type obs column with the appropriate unknown label so that query cells
+    are treated as unlabeled.
+    """
+    if isinstance(vae, scvi.model._scanvi.SCANVI):
+        scvi.model.SCANVI.prepare_query_anndata(adata, vae)
+        return
+    if isinstance(vae, scvi.model._scvi.SCVI):
+        scvi.model.SCVI.prepare_query_anndata(adata, vae)
+        return
+
+    import scarches
+    if not isinstance(vae, scarches.models.scpoli.scPoli):
+        raise RuntimeError('This VAE model is not yet supported')
+
+    # --- 1. Gene subsetting / padding / reordering ---
+    var_names = pd.Index(vae.adata.var_names)
+
+    intersection = adata.var_names.intersection(var_names)
+    if len(intersection) == 0:
+        raise ValueError(
+            'No reference var names found in query data. '
+            'Please check that the gene identifiers match the reference.'
+        )
+    ratio = len(intersection) / len(var_names)
+    if ratio < _MIN_VAR_NAME_RATIO:
+        warnings.warn(
+            f'Query data contains less than {_MIN_VAR_NAME_RATIO:.0%} of '
+            f'reference var names ({ratio:.1%}). '
+            'This may result in poor performance.',
+            UserWarning,
+            stacklevel=2,
+        )
+
+    genes_to_add = var_names.difference(adata.var_names)
+    if len(genes_to_add) > 0:
+        padding_mtx = csr_matrix(np.zeros((adata.n_obs, len(genes_to_add))))
+        adata_padding = anndata.AnnData(
+            X=padding_mtx.copy(),
+            layers={layer: padding_mtx.copy() for layer in adata.layers},
+        )
+        adata_padding.var_names = genes_to_add
+        adata_padding.obs_names = adata.obs_names
+        adata_out = anndata.concat(
+            [adata, adata_padding],
+            axis=1,
+            join='outer',
+            index_unique=None,
+            merge='unique',
+        )
+    else:
+        adata_out = adata
+
+    # Subset/reorder to exactly the reference var order
+    if not var_names.equals(adata_out.var_names):
+        adata_out._inplace_subset_var(var_names)
+
+    if adata_out is not adata:
+        adata._init_as_actual(adata_out)
+
+    # --- 2. Fill cell-type obs columns with unknown label ---
+    if vae.cell_type_keys_ is not None:
+        unknown_label = vae.unknown_ct_names_[0] if vae.unknown_ct_names_ else 'Unknown'
+        for ct_key in vae.cell_type_keys_:
+            adata.obs[ct_key] = unknown_label
+
+
 def train_scarches(adata,
                    ref_adata,
                    vae,
@@ -185,9 +267,15 @@ def train_scarches(adata,
         if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
             ref_batch_key = vae.adata_manager._registry["setup_args"]["batch_key"]
             adata.obs[ref_batch_key] = adata.obs[col_batch].copy()
+        else:
+            import scarches
+            if isinstance(vae, scarches.models.scpoli.scPoli):
+                # scPoli: condition_keys_ is a list of condition obs columns used during training
+                for cond_key in vae.condition_keys_:
+                    if cond_key != col_batch:
+                        adata.obs[cond_key] = adata.obs[col_batch].copy()
     
-    if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
-        model.prepare_query_anndata(adata, vae)
+    _prepare_query_anndata(adata, vae)
     vae_q = model.load_query_data(adata, vae)
     
     if verbose:
@@ -218,6 +306,13 @@ def get_latent_space(adata,
         if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
             ref_batch_key = vae.adata_manager._registry["setup_args"]["batch_key"]
             adata.obs[ref_batch_key] = adata.obs[col_batch].copy()
+        else:
+            import scarches
+            if isinstance(vae, scarches.models.scpoli.scPoli):
+                # scPoli: condition_keys_ is a list of condition obs columns used during training
+                for cond_key in vae.condition_keys_:
+                    if cond_key != col_batch:
+                        adata.obs[cond_key] = adata.obs[col_batch].copy()
     if isinstance(vae, scvi.model._scanvi.SCANVI):
         ref_annot_key = vae.adata_manager._registry["setup_args"]["labels_key"]
         label_unknown = vae.adata_manager._registry["setup_args"]["unlabeled_category"]
