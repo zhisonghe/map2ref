@@ -7,106 +7,6 @@ import argparse
 _DEFAULT_REF = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'model_Braun')
 
 
-def generate_braun_report(adata_ref,
-           adata_query,
-           presence,
-           df_labels = None,
-           ref_annot_labs = [],
-           vis_rep_ref = 'X_umap',
-           vis_rep_query = 'X_umap',
-           output = 'report',
-           report_type = 'basic',
-           verbose = True
-          ):
-    obs_ref = adata_ref.obs.copy()
-    obs_query = adata_query.obs.copy()
-    os.makedirs(output, exist_ok=True)
-    
-    if verbose:
-        print('[PROGRESS] Making figures...')
-    
-    ref_info2plot = np.intersect1d(np.array(ref_annot_labs), adata_ref.obs.columns).tolist() + ['max_presence']
-    adata_ref.obs['max_presence'] = presence['max'][adata_ref.obs_names]
-    fig, axs = plt.subplots(1, len(ref_info2plot), figsize=(5*len(ref_info2plot),4))
-    axs = np.atleast_1d(axs)
-    for i in range(len(ref_info2plot)-1):
-        sc.pl.embedding(adata_ref, ax=axs[i], basis=vis_rep_ref, color = ref_info2plot[i], show=False, frameon=False, add_outline=False)
-        axs[i].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=5)
-    sc.pl.embedding(adata_ref, ax=axs[len(ref_info2plot)-1], basis=vis_rep_ref, color = 'max_presence', color_map='RdBu', title='Max presence score', frameon=False, size=0.2, sort_order=False, show=False)
-    fig.patch.set_facecolor('#fffaf1')
-    plt.tight_layout()
-    ref_image_b64 = _fig_to_base64(fig)
-    if report_type == 'basic':
-        fig.savefig(os.path.join(output, 'ref.png'))
-    plt.close(fig)
-    
-    if df_labels is not None and len(df_labels)>0:
-        if (isinstance(df_labels, list) or isinstance(df_labels, dict)) and len(df_labels)>1:
-            fig, axs = plt.subplots(len(df_labels), 2, figsize=(9,4*len(df_labels)))
-            for i in range(len(df_labels)):
-                df = df_labels[i] if isinstance(df_labels, list) else df_labels[list(df_labels.keys())[i]]
-                suf = str(i) if isinstance(df_labels, list) else list(df_labels.keys())[i]
-                adata_query.obs['best_score'] = df['best_score'][adata_query.obs_names]
-                adata_query.obs['best_label'] = df['best_label'][adata_query.obs_names]
-                sc.pl.embedding(adata_query, ax=axs[i,0], basis=vis_rep_query, color = 'best_score', color_map='YlGnBu', title='Best score ('+suf+')', show=False, frameon=False, add_outline=False)
-                sc.pl.embedding(adata_query, ax=axs[i,1], basis=vis_rep_query, color = 'best_label', title='Best label ('+suf+')', show=False, frameon=False, add_outline=False)
-                axs[i,1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=5)
-            fig.patch.set_facecolor('#fffaf1')
-            plt.tight_layout()
-        else:
-            if isinstance(df_labels, list):
-                df_labels = df_labels[0]
-            adata_query.obs['best_score'] = df_labels['best_score'][adata_query.obs_names]
-            adata_query.obs['best_label'] = df_labels['best_label'][adata_query.obs_names]
-            fig, axs = plt.subplots(1, 2, figsize=(9,4))
-            sc.pl.embedding(adata_query, ax=axs[0], basis=vis_rep_query, color = 'best_score', color_map='YlGnBu', title='Best score', show=False, frameon=False, add_outline=False)
-            sc.pl.embedding(adata_query, ax=axs[1], basis=vis_rep_query, color = 'best_label', title='Best label', show=False, frameon=False, add_outline=False)
-            axs[1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=5)
-            fig.patch.set_facecolor('#fffaf1')
-            plt.tight_layout()
-    else:
-        fig, axs = plt.subplots(1, 1, figsize=(4,2))
-        axs.axis([0, 10, 0, 10])
-        axs.text(5,5,'No label transfer', verticalalignment='center', horizontalalignment='center')
-        axs.set_axis_off()
-        fig.patch.set_facecolor('#fffaf1')
-
-    query_image_b64 = _fig_to_base64(fig)
-    if report_type == 'basic':
-        fig.savefig(os.path.join(output, 'query.png'))
-    plt.close(fig)
-        
-    
-    if verbose:
-        print('[PROGRESS] Generating HTML...')
-    
-    title_text = 'Reference mapping report'
-    text = 'This is the brief report of the reference mapping results'
-    ref_text = 'Reference plots (annotation and presence scores)'
-    query_text = 'Query plots (label transfer)'
-
-    if report_type == 'basic':
-        _write_basic_html(output, 'Report', title_text, text, ref_text, query_text)
-    elif report_type == 'fancy':
-        _write_fancy_html(output,
-                          title_text,
-                          text,
-                          ref_text,
-                          query_text,
-                          ref_image_b64,
-                          query_image_b64,
-                          presence,
-                          df_labels,
-                          ref_annot_labs,
-                          vis_rep_ref,
-                          vis_rep_query)
-    else:
-        raise ValueError("report_type must be 'basic' or 'fancy'")
-
-    adata_ref.obs = obs_ref
-    adata_query.obs = obs_query
-
-
 def hierarchical_region_lab_transfer(adata_ref, adata_query, wknn):
     region_incl = {'Forebrain' : ['Forebrain','Telencephalon','Cortex','Subcortex','Striatum','Hippocampus','Diencephalon','Hypothalamus','Thalamus'],
                    'Telencephalon': ['Telencephalon','Cortex','Subcortex','Striatum'],
@@ -272,7 +172,7 @@ if __name__ == '__main__':
     from scipy import sparse
     from helpers.mapping_scarches import train_scarches, get_latent_space
     from helpers.wknn import estimate_presence_score, transfer_labels
-    from helpers.report import _fig_to_base64, _write_basic_html, _write_fancy_html
+    from helpers.report import generate_mapping_report
     from tqdm import tqdm
 
     verbose = not args.quiet
@@ -376,7 +276,7 @@ if __name__ == '__main__':
     
     if verbose:
         print('[PROGRESS] Generating HTML report...')
-    generate_braun_report(
+    generate_mapping_report(
         adata_ref,
         adata_query,
         df_presence,
