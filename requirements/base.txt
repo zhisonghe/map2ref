@@ -1,0 +1,13 @@
+# Core runtime dependencies shared across platforms
+setuptools<=81.0.0
+scvi-tools==1.1.2
+scArches==0.6.1
+scanpy
+anndata
+numpy
+pandas
+scipy
+torch
+pynndescent
+tqdm
+matplotlib

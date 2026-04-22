@@ -9,9 +9,9 @@ import os
 import argparse
 
 from scipy import sparse
-from mapping_scarches import train_scarches, get_latent_space
-from wknn import estimate_presence_score, transfer_labels
-from report import report
+from helpers.mapping_scarches import train_scarches, get_latent_space
+from helpers.wknn import estimate_presence_score, transfer_labels
+from helpers.report import report
 
 from tqdm import tqdm
 
@@ -152,6 +152,14 @@ def cmd_interface():
         help='Always make a new UMAP of the query data for visualization using the projected latent representation'
     )
     parser.add_argument(
+        '--report-type',
+        type=str,
+        dest='report_type',
+        default='basic',
+        choices=['basic', 'fancy'],
+        help='HTML report style to generate (default: basic)'
+    )
+    parser.add_argument(
         '--quiet',
         action='store_true',
         dest='quiet',
@@ -242,15 +250,18 @@ if __name__ == '__main__':
     
     if verbose:
         print('[PROGRESS] Generating HTML report...')
-    report(adata_ref,
-           adata_query,
-           df_presence,
-           df_labels = {'Class':df_labs_class, 'Region':df_labs_region, 'Region_hier': pd.DataFrame({'best_label': vec_lab_region, 'best_score' : np.repeat(1,len(vec_lab_region))}, index=vec_lab_region.index), 'NTT':df_labs_ntt} if not args.no_lab_transfer else None,
-           ref_annot_labs = ['CellClass','Subregion','Neuron_NTT'],
-           vis_rep_query = args.vis_rep_query,
-           lat_rep_query = 'X_scarches',
-           output = loc_report,
-           verbose=verbose)
+    report(
+        adata_ref,
+        adata_query,
+        df_presence,
+        df_labels = {'Class':df_labs_class, 'Region':df_labs_region, 'Region_hier': pd.DataFrame({'best_label': vec_lab_region, 'best_score' : np.repeat(1,len(vec_lab_region))}, index=vec_lab_region.index), 'NTT':df_labs_ntt} if not args.no_lab_transfer else None,
+        ref_annot_labs = ['CellClass','Subregion','Neuron_NTT'],
+        vis_rep_query = args.vis_rep_query,
+        lat_rep_query = 'X_scarches',
+        output = loc_report,
+        report_type = args.report_type,
+        verbose=verbose
+        )
     
     if args.save_full_query:
         if verbose:

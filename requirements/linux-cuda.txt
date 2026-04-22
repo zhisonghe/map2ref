@@ -1,0 +1,3 @@
+# Linux/CUDA install set: core dependencies + RAPIDS cuML pin
+-r base.txt
+cuml==24.4
