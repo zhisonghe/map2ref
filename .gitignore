@@ -1,5 +1,6 @@
-# Ignore the model folders
+# Ignore model folder contents but keep the folder itself
 models/*
+!models/.gitkeep
 
 # Ignore Python Cache
 __pycache__
