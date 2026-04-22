@@ -1,2 +1,3 @@
 # macOS install set: include core dependencies, exclude RAPIDS/cuML
 -r base.txt
+torch

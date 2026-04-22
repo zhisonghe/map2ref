@@ -1,3 +1,10 @@
-# Linux/CUDA install set: core dependencies + RAPIDS cuML pin
+# Linux/CUDA install set: core dependencies + RAPIDS cuML pin (CUDA 12)
 -r base.txt
-cuml==24.4
+
+# PyTorch CUDA 12.1 wheel
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.1.2+cu121
+
+# RAPIDS cuML CUDA 12 wheel
+--extra-index-url https://pypi.nvidia.com
+cuml-cu12==24.4.*

@@ -44,7 +44,8 @@ Pinned versions required by this project are included:
 - `setuptools<=81.0.0`
 - `scvi-tools==1.1.2`
 - `scArches==0.6.1`
-- `cuml==24.4` (Linux/CUDA dependency set)
+- `torch==2.1.2+cu121` (Linux/CUDA dependency set, CUDA 12.1)
+- `cuml-cu12==24.4.*` (Linux/CUDA dependency set, CUDA 12)
 
 ## Alternative environment managers
 
