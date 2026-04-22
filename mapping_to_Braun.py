@@ -8,12 +8,115 @@ import scvi
 import os
 import argparse
 
+import matplotlib.pyplot as plt
 from scipy import sparse
 from helpers.mapping_scarches import train_scarches, get_latent_space
 from helpers.wknn import estimate_presence_score, transfer_labels
-from helpers.report import report
+from helpers.report import _fig_to_base64, _write_basic_html, _write_fancy_html
 
 from tqdm import tqdm
+
+
+
+def generate_braun_report(adata_ref,
+           adata_query,
+           presence,
+           df_labels = None,
+           ref_annot_labs = [],
+           vis_rep_ref = 'X_umap',
+           vis_rep_query = 'X_umap',
+           output = 'report',
+           report_type = 'basic',
+           verbose = True
+          ):
+    obs_ref = adata_ref.obs.copy()
+    obs_query = adata_query.obs.copy()
+    os.makedirs(output, exist_ok=True)
+    
+    if verbose:
+        print('[PROGRESS] Making figures...')
+    
+    ref_info2plot = np.intersect1d(np.array(ref_annot_labs), adata_ref.obs.columns).tolist() + ['max_presence']
+    adata_ref.obs['max_presence'] = presence['max'][adata_ref.obs_names]
+    fig, axs = plt.subplots(1, len(ref_info2plot), figsize=(5*len(ref_info2plot),4))
+    axs = np.atleast_1d(axs)
+    for i in range(len(ref_info2plot)-1):
+        sc.pl.embedding(adata_ref, ax=axs[i], basis=vis_rep_ref, color = ref_info2plot[i], show=False, frameon=False, add_outline=False)
+        axs[i].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=5)
+    sc.pl.embedding(adata_ref, ax=axs[len(ref_info2plot)-1], basis=vis_rep_ref, color = 'max_presence', color_map='RdBu', title='Max presence score', frameon=False, size=0.2, sort_order=False, show=False)
+    fig.patch.set_facecolor('#fffaf1')
+    plt.tight_layout()
+    ref_image_b64 = _fig_to_base64(fig)
+    if report_type == 'basic':
+        fig.savefig(os.path.join(output, 'ref.png'))
+    plt.close(fig)
+    
+    if df_labels is not None and len(df_labels)>0:
+        if (isinstance(df_labels, list) or isinstance(df_labels, dict)) and len(df_labels)>1:
+            fig, axs = plt.subplots(len(df_labels), 2, figsize=(9,4*len(df_labels)))
+            for i in range(len(df_labels)):
+                df = df_labels[i] if isinstance(df_labels, list) else df_labels[list(df_labels.keys())[i]]
+                suf = str(i) if isinstance(df_labels, list) else list(df_labels.keys())[i]
+                adata_query.obs['best_score'] = df['best_score'][adata_query.obs_names]
+                adata_query.obs['best_label'] = df['best_label'][adata_query.obs_names]
+                sc.pl.embedding(adata_query, ax=axs[i,0], basis=vis_rep_query, color = 'best_score', color_map='YlGnBu', title='Best score ('+suf+')', show=False, frameon=False, add_outline=False)
+                sc.pl.embedding(adata_query, ax=axs[i,1], basis=vis_rep_query, color = 'best_label', title='Best label ('+suf+')', show=False, frameon=False, add_outline=False)
+                axs[i,1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=5)
+            fig.patch.set_facecolor('#fffaf1')
+            plt.tight_layout()
+        else:
+            if isinstance(df_labels, list):
+                df_labels = df_labels[0]
+            adata_query.obs['best_score'] = df_labels['best_score'][adata_query.obs_names]
+            adata_query.obs['best_label'] = df_labels['best_label'][adata_query.obs_names]
+            fig, axs = plt.subplots(1, 2, figsize=(9,4))
+            sc.pl.embedding(adata_query, ax=axs[0], basis=vis_rep_query, color = 'best_score', color_map='YlGnBu', title='Best score', show=False, frameon=False, add_outline=False)
+            sc.pl.embedding(adata_query, ax=axs[1], basis=vis_rep_query, color = 'best_label', title='Best label', show=False, frameon=False, add_outline=False)
+            axs[1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=5)
+            fig.patch.set_facecolor('#fffaf1')
+            plt.tight_layout()
+    else:
+        fig, axs = plt.subplots(1, 1, figsize=(4,2))
+        axs.axis([0, 10, 0, 10])
+        axs.text(5,5,'No label transfer', verticalalignment='center', horizontalalignment='center')
+        axs.set_axis_off()
+        fig.patch.set_facecolor('#fffaf1')
+
+    query_image_b64 = _fig_to_base64(fig)
+    if report_type == 'basic':
+        fig.savefig(os.path.join(output, 'query.png'))
+    plt.close(fig)
+        
+    
+    if verbose:
+        print('[PROGRESS] Generating HTML...')
+    
+    title_text = 'Reference mapping report'
+    text = 'This is the brief report of the reference mapping results'
+    ref_text = 'Reference plots (annotation and presence scores)'
+    query_text = 'Query plots (label transfer)'
+
+    if report_type == 'basic':
+        _write_basic_html(output, 'Report', title_text, text, ref_text, query_text)
+    elif report_type == 'fancy':
+        _write_fancy_html(output,
+                          title_text,
+                          text,
+                          ref_text,
+                          query_text,
+                          ref_image_b64,
+                          query_image_b64,
+                          presence,
+                          df_labels,
+                          ref_annot_labs,
+                          vis_rep_ref,
+                          vis_rep_query)
+    else:
+        raise ValueError("report_type must be 'basic' or 'fancy'")
+
+    adata_ref.obs = obs_ref
+    adata_query.obs = obs_query
+
 
 def hierarchical_region_lab_transfer(adata_ref, adata_query, wknn):
     region_incl = {'Forebrain' : ['Forebrain','Telencephalon','Cortex','Subcortex','Striatum','Hippocampus','Diencephalon','Hypothalamus','Thalamus'],
@@ -86,12 +189,6 @@ def cmd_interface():
         help='Save the full query anndata with the mapping results'
     )
     parser.add_argument(
-        '--save-vae-query',
-        action='store_true',
-        dest='save_vae_query',
-        help='Save the processed query anndata for scArches training'
-    )
-    parser.add_argument(
         '-b','--query-batch-key',
         type=str,
         dest='query_batch_key',
@@ -160,6 +257,12 @@ def cmd_interface():
         help='HTML report style to generate (default: basic)'
     )
     parser.add_argument(
+        '--skip-scale-check',
+        action='store_true',
+        dest='skip_scale_check',
+        help='Skip expression scale sanity check between query and reference (use if detection fails)'
+    )
+    parser.add_argument(
         '--quiet',
         action='store_true',
         dest='quiet',
@@ -187,12 +290,12 @@ if __name__ == '__main__':
     adata_ref = sc.read(file_ref_adata)
     adata_query = sc.read(args.query)
     if args.save_full_query:
-        adata_query_full = adata_query
+        adata_query_full = adata_query.copy()
     
     if verbose:
         print('[PROGRESS] scArches model training...')
     vae = scvi.model.SCANVI.load(args.ref, adata_ref)
-    vae_q = train_scarches(adata_query, adata_ref, vae = vae, col_batch = args.query_batch_key, batch_size = args.batch_size, epochs = args.epochs, keep_original_adata = False, verbose = not args.quiet)
+    vae_q = train_scarches(adata_query, adata_ref, vae = vae, col_batch = args.query_batch_key, batch_size = args.batch_size, epochs = args.epochs, keep_original_adata = False, skip_scale_check = args.skip_scale_check, verbose = not args.quiet)
     
     if verbose:
         print('[PROGRESS] Saving the model...')
@@ -201,7 +304,7 @@ if __name__ == '__main__':
     vae_q.save(
         loc_scarches_model,
         overwrite=True,
-        save_anndata=args.save_vae_query,
+        save_anndata=False,
     )
     
     if verbose:
@@ -215,8 +318,6 @@ if __name__ == '__main__':
     np.save(file_lat_query, lat_rep_q)
     adata_ref.obsm['X_scarches'] = lat_rep_ref
     adata_query.obsm['X_scarches'] = lat_rep_q
-    if args.save_full_query:
-        adata_query_full.obsm['X_scarches'] = lat_rep_q
     
     if verbose:
         print('[PROGRESS] Calculating presence scores per query data set...')
@@ -242,31 +343,50 @@ if __name__ == '__main__':
         df_labs_ntt.to_csv(os.path.join(args.output, 'label_transfer_NTT.tsv'), sep='\t')
         vec_lab_region.to_csv(os.path.join(args.output, 'label_transfer_region_hier.tsv'), sep='\t')
         
-        if args.save_full_query:
-            adata_query_full.obs['CellClass'] = df_labs_class['best_label'].copy()
-            adata_query_full.obs['Subregion'] = df_labs_region['best_label'].copy()
-            adata_query_full.obs['Subregion_hier'] = vec_lab_region.copy()
-            adata_query_full.obs['Neuron_NTT'] = df_labs_ntt['best_label'].copy()
+        adata_query.obs['pred_Braun_CellClass'] = df_labs_class['best_label'].copy()
+        adata_query.obs['pred_Braun_Subregion'] = df_labs_region['best_label'].copy()
+        adata_query.obs['pred_Braun_Subregion_hier'] = vec_lab_region.copy()
+        adata_query.obs['pred_Braun_Neuron_NTT'] = df_labs_ntt['best_label'].copy()
+    
+    if verbose:
+        print('[PROGRESS] Preparing embeddings for visualization...')
+    if 'X_umap' not in adata_ref.obsm.keys():
+        sc.pp.neighbors(adata_ref, use_rep='X_scarches')
+        sc.tl.umap(adata_ref)
+    if args.force_new_umap or (args.vis_rep_query is None) or (args.vis_rep_query not in adata_query.obsm.keys()):
+        sc.pp.neighbors(adata_query, use_rep='X_scarches')
+        sc.tl.umap(adata_query)
+        args.vis_rep_query = 'X_umap'
+    
+    if verbose:
+        print('[PROGRESS] Saving query data...')
+    adata_query.write_h5ad(os.path.join(args.output, 'query.h5ad'))
+    
+    if args.save_full_query:
+        if verbose:
+            print('[PROGRESS] Saving full query anndata (all genes + results)...')
+        adata_query_full.obsm['X_scarches'] = adata_query.obsm['X_scarches']
+        adata_query_full.obsm['X_umap'] = adata_query.obsm['X_umap']
+        if not args.no_lab_transfer:
+            adata_query_full.obs['pred_Braun_CellClass'] = adata_query.obs['pred_Braun_CellClass'].copy()
+            adata_query_full.obs['pred_Braun_Subregion'] = adata_query.obs['pred_Braun_Subregion'].copy()
+            adata_query_full.obs['pred_Braun_Subregion_hier'] = adata_query.obs['pred_Braun_Subregion_hier'].copy()
+            adata_query_full.obs['pred_Braun_Neuron_NTT'] = adata_query.obs['pred_Braun_Neuron_NTT'].copy()
+        adata_query_full.write_h5ad(file_q_adata2save)
     
     if verbose:
         print('[PROGRESS] Generating HTML report...')
-    report(
+    generate_braun_report(
         adata_ref,
         adata_query,
         df_presence,
         df_labels = {'Class':df_labs_class, 'Region':df_labs_region, 'Region_hier': pd.DataFrame({'best_label': vec_lab_region, 'best_score' : np.repeat(1,len(vec_lab_region))}, index=vec_lab_region.index), 'NTT':df_labs_ntt} if not args.no_lab_transfer else None,
         ref_annot_labs = ['CellClass','Subregion','Neuron_NTT'],
         vis_rep_query = args.vis_rep_query,
-        lat_rep_query = 'X_scarches',
         output = loc_report,
         report_type = args.report_type,
         verbose=verbose
         )
-    
-    if args.save_full_query:
-        if verbose:
-            print('[PROGRESS] Saving query anndata...')
-        adata_query_full.write_h5ad(file_q_adata2save)
     
     if verbose:
         print('[DONE]')
