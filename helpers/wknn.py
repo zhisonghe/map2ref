@@ -222,7 +222,11 @@ def estimate_presence_score(ref_adata,
     
     if log:
         df_presence = df_presence.apply(lambda x: np.log1p(x), axis=0)
-    df_presence_norm = df_presence.apply(lambda x: np.clip(x, np.percentile(x,1), np.percentile(x,99)), axis=0).apply(lambda x: (x-np.min(x))/(np.max(x)-np.min(x)), axis=0)
+    def _norm_col(x):
+        x = np.clip(x, np.percentile(x, 1), np.percentile(x, 99))
+        rng = np.max(x) - np.min(x)
+        return (x - np.min(x)) / rng if rng > 0 else np.zeros_like(x)
+    df_presence_norm = df_presence.apply(_norm_col, axis=0)
     max_presence = df_presence_norm.max(1)
     
     return {'max' : max_presence, 'per_group' : df_presence_norm, 'wknn' : wknn, 'ref_trans_prop' : ref_trans_prop}
