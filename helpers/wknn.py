@@ -224,9 +224,22 @@ def estimate_presence_score(ref_adata,
     if log:
         df_presence = df_presence.apply(lambda x: np.log1p(x), axis=0)
     def _norm_col(x):
-        x = np.clip(x, np.percentile(x, 1), np.percentile(x, 99))
-        rng = np.max(x) - np.min(x)
-        return (x - np.min(x)) / rng if rng > 0 else np.zeros_like(x)
+        p1, p99 = np.percentile(x, 1), np.percentile(x, 99)
+        if p1 == p99:
+            if np.min(x) != np.max(x):
+                warnings.warn(
+                    'Presence score column has identical 1st and 99th percentiles but non-zero '
+                    'range; falling back to min-max normalization without percentile clipping.',
+                    UserWarning,
+                    stacklevel=3,
+                )
+                rng = np.max(x) - np.min(x)
+                return (x - np.min(x)) / rng
+            else:
+                return np.zeros_like(x)
+        x = np.clip(x, p1, p99)
+        rng = p99 - p1
+        return (x - p1) / rng
     df_presence_norm = df_presence.apply(_norm_col, axis=0)
     max_presence = df_presence_norm.max(1)
     
