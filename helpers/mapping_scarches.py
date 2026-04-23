@@ -13,6 +13,9 @@ import scanpy as sc
 import scipy
 from scipy.sparse import csr_matrix
 import scvi
+from helpers.log import get_logger
+
+_log = get_logger('mapping_scarches')
 
 def is_lognorm(mat, max_row_num=10000, max_col_num=None):
     """
@@ -199,7 +202,7 @@ def train_scarches(adata,
                    skip_scale_check = False,
                    verbose = True):    
     if verbose:
-        print('[PROGRESS] Preparing data and model...')
+        _log('Preparing data and model...')
     
     if keep_original_adata:
         ref_idx = adata.var_names.isin(ref_adata.var_names)
@@ -225,7 +228,7 @@ def train_scarches(adata,
             expected_log = r_x_log
         else:
             expected_log = is_lognorm(ref_adata.layers[used_layer])
-        print('[PROGRESS] Data expected to be in log: ' + str(expected_log))
+        _log('Data expected to be in log: ' + str(expected_log))
         # make X a copy of the expected layer in ref
         if r_x_log != expected_log:
             ref_adata.layers['_raw_X'] = ref_adata.X.copy()
@@ -247,21 +250,21 @@ def train_scarches(adata,
                     adata.layers[used_layer] = adata.X.copy()
         else:
             if verbose:
-                print('[PROGRESS] Skipping expression scale sanity check as requested')
+                _log('Skipping expression scale sanity check as requested')
             if used_layer and used_layer in adata.layers.keys():
                 adata.layers['_raw_X'] = adata.X.copy()
                 adata.X = adata.layers[used_layer].copy()
             elif used_layer:
                 adata.layers[used_layer] = adata.X.copy()
     else:
-        print('[PROGRESS] Data expected to be in log: ' + str(r_x_log))
+        _log('Data expected to be in log: ' + str(r_x_log))
         if not skip_scale_check:
             q_x_log = is_lognorm(adata.X)
             if q_x_log != r_x_log:
                 raise RuntimeError('The query data and reference data do not have the same expression scale (raw counts vs. log-normalized)')
         else:
             if verbose:
-                print('[PROGRESS] Skipping expression scale sanity check as requested')
+                _log('[PROGRESS] Skipping expression scale sanity check as requested')
     
     if col_batch:
         if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
@@ -289,7 +292,7 @@ def train_scarches(adata,
             raise RuntimeError('This VAE model is not yet supported')
     
     if verbose:
-        print('[PROGRESS] Fitting model...')
+        _log('Fitting model...')
     
     vae_q.train(
         batch_size=batch_size,
@@ -298,7 +301,7 @@ def train_scarches(adata,
     )
     
     if verbose:
-        print('[PROGRESS] The scARCHES model training is done.')
+        _log('scARCHES model training is done.')
     
     return vae_q
 
@@ -453,14 +456,14 @@ if __name__ == "__main__":
     else:
         raise RuntimeError('The VAE model type is not yet supported. Should be one of SCANVI, SCVI and SCPOLI')
     
-    print("[PROGRESS] Reading data...")
+    _log('Reading data...')
     adata = sc.read(args.H5AD)
     ref_adata = sc.read(args.REF_H5AD)
     
     vae = model.load(args.model, ref_adata)
     vae_q = train_scarches(adata, ref_adata, vae = vae, col_batch = args.query_batch_key, batch_size = args.batch_size, epochs = args.epochs, keep_original_adata = False, skip_scale_check = args.skip_scale_check, verbose = True)
     
-    print("[PROGRESS] Saving model and params...")
+    _log('Saving model and params...')
     os.makedirs(args.output, exist_ok=True)
     vae_q.save(
         args.output,
@@ -471,7 +474,7 @@ if __name__ == "__main__":
     with open(os.path.join(args.output, "params.txt"), "w") as f:
         f.write(str(args))
     
-    print("[PROGRESS] Saving latent representations...")
+    _log('Saving latent representations...')
     lat_reps = get_latent_space(adata, vae_q, ref_adata, col_batch = args.query_batch_key, ref_annot_unknown = not args.use_ref_annot)
     lat_rep_ref, lat_rep_q = (lat_reps['ref'], lat_reps['query'])
     np.save(os.path.join(args.output, "lat_rep_ref.npy"), lat_rep_ref)

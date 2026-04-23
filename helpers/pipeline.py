@@ -8,6 +8,9 @@ from scipy import sparse
 from helpers.mapping_scarches import train_scarches, get_latent_space
 from helpers.wknn import estimate_presence_score, transfer_labels
 from helpers.report import generate_mapping_report
+from helpers.log import get_logger
+
+_log = get_logger('pipeline')
 
 
 def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=None):
@@ -59,7 +62,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
 
     # ------------------------------------------------------------ load data
     if verbose:
-        print('[PROGRESS] Loading data...')
+        _log('Loading data...')
     adata_ref = sc.read(file_ref_adata)
     adata_query = sc.read(args.query)
     if args.save_full_query:
@@ -67,7 +70,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
 
     # --------------------------------------------------------- model training
     if verbose:
-        print('[PROGRESS] scArches model training...')
+        _log('scArches model training...')
     vae = load_vae(adata_ref)
 
     # ---------------------- optional query layer remapping
@@ -81,14 +84,14 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
             # model expects .X; only copy if the user pointed at a different layer
             if args.query_layer != 'X':
                 if verbose:
-                    print(f'[PROGRESS] Copying query layer "{args.query_layer}" to .X')
+                    _log(f'Copying query layer "{args.query_layer}" to .X')
                 adata_query.X = adata_query.layers[args.query_layer].copy()
         else:
             # model expects a named layer; only copy if the user pointed at a different source
             if args.query_layer != used_layer:
                 src = adata_query.X if args.query_layer == 'X' else adata_query.layers[args.query_layer]
                 if verbose:
-                    print(f'[PROGRESS] Copying query layer "{args.query_layer}" to layer "{used_layer}"')
+                    _log(f'Copying query layer "{args.query_layer}" to layer "{used_layer}"')
                 adata_query.layers[used_layer] = src.copy()
 
     vae_q = train_scarches(
@@ -103,19 +106,19 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
     )
 
     if verbose:
-        print('[PROGRESS] Saving the model...')
+        _log('Saving the model...')
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(loc_scarches_model, exist_ok=True)
     vae_q.save(loc_scarches_model, overwrite=True)
 
     # ------------------------------------------------- latent representation
     if verbose:
-        print('[PROGRESS] Generating latent representations...')
+        _log('Generating latent representations...')
     lat_reps = get_latent_space(adata_query, vae_q, adata_ref, col_batch=args.query_batch_key)
     lat_rep_ref, lat_rep_q = lat_reps['ref'], lat_reps['query']
 
     if verbose:
-        print('[PROGRESS] Saving latent representations...')
+        _log('Saving latent representations...')
     np.save(file_lat_ref, lat_rep_ref)
     np.save(file_lat_query, lat_rep_q)
     adata_ref.obsm['X_scarches'] = lat_rep_ref
@@ -123,7 +126,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
 
     # ---------------------------------------------------- presence scores
     if verbose:
-        print('[PROGRESS] Calculating presence scores per query data set...')
+        _log('Calculating presence scores per query data set...')
     presence = estimate_presence_score(
         adata_ref, adata_query,
         use_rep_ref_wknn='X_scarches',
@@ -136,7 +139,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
     max_presence, group_presence = presence['max'], presence['per_group']
 
     if verbose:
-        print('[PROGRESS] Saving wknn and presence scores...')
+        _log('Saving wknn and presence scores...')
     wknn = presence['wknn']
     sparse.save_npz(file_wknn, wknn)
     df_presence = pd.concat(
@@ -148,7 +151,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
     df_labels = None
     if not args.no_lab_transfer:
         keys_str = ', '.join(cfg['key'] for cfg in label_config)
-        print(f'[PROGRESS] Transferring labels of {keys_str}...')
+        _log(f'Transferring labels of {keys_str}...')
 
         df_labels = {}
         for cfg in label_config:
@@ -156,7 +159,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
             df_labels[cfg['report_key']] = df
             adata_query.obs[cfg['obs_col']] = df['best_label'].copy()
 
-        print('[PROGRESS] Saving transferred labels...')
+        _log('Saving transferred labels...')
         for cfg in label_config:
             df_labels[cfg['report_key']].to_csv(
                 os.path.join(args.output, cfg['tsv']), sep='\t'
@@ -168,7 +171,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
 
     # ------------------------------------------------ UMAP for visualization
     if verbose:
-        print('[PROGRESS] Preparing embeddings for visualization...')
+        _log('Preparing embeddings for visualization...')
     if 'X_umap' not in adata_ref.obsm.keys():
         sc.pp.neighbors(adata_ref, use_rep='X_scarches')
         sc.tl.umap(adata_ref)
@@ -179,12 +182,12 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
 
     # --------------------------------------------------- save query h5ad
     if verbose:
-        print('[PROGRESS] Saving query data...')
+        _log('Saving query data...')
     adata_query.write_h5ad(os.path.join(args.output, 'query.h5ad'))
 
     if args.save_full_query:
         if verbose:
-            print('[PROGRESS] Saving full query anndata (all genes + results)...')
+            _log('Saving full query anndata (all genes + results)...')
         adata_query_full.obs = adata_query.obs.copy()
         adata_query_full.obsm['X_scarches'] = adata_query.obsm['X_scarches']
         adata_query_full.obsm[args.vis_rep_query] = adata_query.obsm[args.vis_rep_query]
@@ -192,7 +195,7 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
 
     # -------------------------------------------------------- HTML report
     if verbose:
-        print('[PROGRESS] Generating HTML report...')
+        _log('Generating HTML report...')
     generate_mapping_report(
         adata_ref,
         adata_query,
@@ -206,4 +209,4 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
     )
 
     if verbose:
-        print('[DONE]')
+        _log('Done.')

@@ -10,6 +10,9 @@ from typing import Optional, Union, Mapping, Literal
 import warnings
 import sys
 import os
+from helpers.log import get_logger
+
+_log = get_logger('wknn')
 import importlib.util
 import argparse
 
@@ -181,8 +184,8 @@ def estimate_presence_score(ref_adata,
                            ):
     if wknn is None:
         if verbose:
-            print('[PROGRESS] The wknn is not provided')
-            print('[PROGRESS] Calculating wknn between ref and query...')
+            _log('The wknn is not provided')
+            _log('Calculating wknn between ref and query...')
         ref = ref_adata.obsm[use_rep_ref_wknn]
         query = query_adata.obsm[use_rep_query_wknn]
         wknn = get_wknn(ref = ref,
@@ -194,14 +197,14 @@ def estimate_presence_score(ref_adata,
     
     if ref_trans_prop is None and do_random_walk:
         if verbose:
-            print('[PROGRESS] Ref-ref transition matrix is not provided while random-walk is requested')
-            print('[PROGRESS] Calculating ref-ref transition matrix...')
+            _log('Ref-ref transition matrix is not provided while random-walk is requested')
+            _log('Calculating ref-ref transition matrix...')
         if use_rep_ref_trans_prop is None: use_rep_ref_trans_prop = use_rep_ref_wknn
         ref = ref_adata.obsm[use_rep_ref_trans_prop]
         ref_trans_prop = get_transition_prob_mat(ref, k=k_ref_trans_prop)
     
     if verbose:
-        print('[PROGRESS] Calculating presence scores...')
+        _log('Calculating presence scores...')
     if split_by and split_by in query_adata.obs.columns:
         presence_split = [ np.array(wknn[query_adata.obs[split_by] == x,:].sum(axis = 0)).flatten() for x in query_adata.obs[split_by].unique() ]
     else:
@@ -209,7 +212,7 @@ def estimate_presence_score(ref_adata,
     
     if do_random_walk:
         if verbose:
-            print('[PROGRESS] Smoothing presence scores by random-walk...')
+            _log('Smoothing presence scores by random-walk...')
         presence_split_sm = [ random_walk_with_restart(init = x, transition_prob = ref_trans_prop, alpha = alpha_random_walk, num_rounds = num_rounds_random_walk) for x in presence_split ]
     else:
         presence_split_sm = [ x[:,None] for x in presence_split ]
@@ -349,7 +352,7 @@ if __name__ == "__main__":
     df_presence.to_csv(os.path.join(args.output, 'presence_scores.tsv'), sep='\t')
     
     if args.col_transfer:
-        print('[PROGRESS] Transferring labels of ' + args.col_transfer + '...')
+        _log('Transferring labels of ' + args.col_transfer + '...')
         df_labs = transfer_labels(adata_ref, adata_query, wknn, label_key=args.col_transfer)
         df_labs.to_csv(os.path.join(args.output, 'label_transfer.tsv'), sep='\t')
     

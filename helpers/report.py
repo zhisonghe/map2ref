@@ -5,6 +5,9 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import scanpy as sc
+from helpers.log import get_logger
+
+_log = get_logger('report')
 
 
 def generate_mapping_report(adata_ref,
@@ -23,7 +26,7 @@ def generate_mapping_report(adata_ref,
     os.makedirs(output, exist_ok=True)
 
     if verbose:
-        print('[PROGRESS] Making figures...')
+        _log('Making figures...')
 
     ref_info2plot = np.intersect1d(np.array(ref_annot_labs), adata_ref.obs.columns).tolist() + ['max_presence']
     adata_ref.obs['max_presence'] = presence['max'][adata_ref.obs_names]
@@ -77,7 +80,7 @@ def generate_mapping_report(adata_ref,
     plt.close(fig)
 
     if verbose:
-        print('[PROGRESS] Generating HTML...')
+        _log('Generating HTML...')
 
     title_text = 'Reference mapping report'
     text = 'This is the brief report of the reference mapping results'
