@@ -30,12 +30,18 @@ def generate_mapping_report(adata_ref,
 
     ref_info2plot = np.intersect1d(np.array(ref_annot_labs), adata_ref.obs.columns).tolist() + ['max_presence']
     adata_ref.obs['max_presence'] = presence['max'][adata_ref.obs_names]
-    fig, axs = plt.subplots(1, len(ref_info2plot), figsize=(5*len(ref_info2plot),4))
+    n_ref = len(ref_info2plot)
+    if report_type == 'fancy':
+        # one column so it stacks to match the height of the multi-row query panel
+        fig, axs = plt.subplots(n_ref, 1, figsize=(5, 4 * n_ref))
+    else:
+        # one row for the basic side-by-side HTML layout
+        fig, axs = plt.subplots(1, n_ref, figsize=(5 * n_ref, 4))
     axs = np.atleast_1d(axs)
-    for i in range(len(ref_info2plot)-1):
-        sc.pl.embedding(adata_ref, ax=axs[i], basis=vis_rep_ref, color = ref_info2plot[i], show=False, frameon=False, add_outline=False)
+    for i in range(n_ref - 1):
+        sc.pl.embedding(adata_ref, ax=axs[i], basis=vis_rep_ref, color=ref_info2plot[i], show=False, frameon=False, add_outline=False)
         axs[i].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=5)
-    sc.pl.embedding(adata_ref, ax=axs[len(ref_info2plot)-1], basis=vis_rep_ref, color = 'max_presence', color_map='RdBu', title='Max presence score', frameon=False, size=0.2, sort_order=False, show=False)
+    sc.pl.embedding(adata_ref, ax=axs[n_ref - 1], basis=vis_rep_ref, color='max_presence', color_map='RdBu', title='Max presence score', frameon=False, size=0.2, sort_order=False, show=False)
     fig.patch.set_facecolor('#fffaf1')
     plt.tight_layout()
     ref_image_b64 = _fig_to_base64(fig)
