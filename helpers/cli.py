@@ -32,8 +32,8 @@ def build_arg_parser(description, default_ref, no_lab_transfer_help):
         '-q', '--query',
         type=str,
         dest='query',
-        required=True,
-        help='H5AD file of the query data',
+        default=None,
+        help='H5AD file of the query data (required unless --report-only is used)',
     )
     parser.add_argument(
         '-o', '--output',
@@ -137,5 +137,12 @@ def build_arg_parser(description, default_ref, no_lab_transfer_help):
         action='store_true',
         dest='quiet',
         help='Quiet run without verbose message',
+    )
+    parser.add_argument(
+        '--report-only',
+        action='store_true',
+        dest='report_only',
+        help='Re-generate the HTML report from existing output files without re-running the mapping pipeline. '
+             'Loads query.h5ad and presence_scores.tsv from the output folder and ref.h5ad from the model directory.',
     )
     return parser

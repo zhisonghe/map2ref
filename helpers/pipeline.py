@@ -50,6 +50,9 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
     """
     verbose = not args.quiet
 
+    if args.query is None:
+        raise ValueError('--query/-q is required unless --report-only is used')
+
     # ------------------------------------------------------------------ paths
     file_ref_adata      = os.path.join(args.ref, 'ref.h5ad')
     file_lat_ref        = os.path.join(args.output, 'lat_rep_ref.npy')
@@ -200,6 +203,86 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
         adata_ref,
         adata_query,
         df_presence,
+        df_labels=df_labels,
+        ref_annot_labs=ref_annot_labs,
+        vis_rep_query=args.vis_rep_query,
+        output=loc_report,
+        report_type=args.report_type,
+        verbose=verbose,
+    )
+
+    if verbose:
+        _log('Done.')
+
+
+def run_report_only(args, label_config, ref_annot_labs, extra_label_config=None):
+    """Re-generate the HTML report from existing output files.
+
+    Loads ref.h5ad from the reference model directory, query.h5ad and
+    presence_scores.tsv from the output folder, and reconstructs df_labels
+    from the label-transfer TSVs listed in label_config / extra_label_config.
+
+    Parameters
+    ----------
+    args:
+        Parsed argparse namespace.
+    label_config : list of dict
+        Same format as used in run_mapping (keys: 'tsv', 'report_key',
+        optionally 'obs_col' used as fallback when the TSV lacks a
+        'best_label' column).
+    ref_annot_labs : list of str
+        Reference obs columns to plot on the reference UMAP panel.
+    extra_label_config : list of dict or None
+        Additional TSVs produced by post_label_hook (e.g. Region_hier).
+        Same dict format as label_config.
+    """
+    verbose = not args.quiet
+
+    file_ref_adata      = os.path.join(args.ref, 'ref.h5ad')
+    file_query_adata    = os.path.join(args.output, 'query.h5ad')
+    file_presence_score = os.path.join(args.output, 'presence_scores.tsv')
+    loc_report          = os.path.join(args.output, 'report')
+
+    if verbose:
+        _log('Loading existing results for report...')
+    adata_ref   = sc.read(file_ref_adata)
+    adata_query = sc.read(file_query_adata)
+
+    # presence_scores.tsv has a 'max' column plus one column per query group
+    presence = pd.read_csv(file_presence_score, sep='\t', index_col=0)
+
+    df_labels = None
+    if not args.no_lab_transfer:
+        df_labels = {}
+        all_label_cfg = list(label_config) + (list(extra_label_config) if extra_label_config else [])
+        for cfg in all_label_cfg:
+            tsv_path = os.path.join(args.output, cfg['tsv'])
+            if os.path.exists(tsv_path):
+                df = pd.read_csv(tsv_path, sep='\t', index_col=0)
+                if 'best_label' not in df.columns:
+                    # TSV was saved from a Series or lacks score columns;
+                    # reconstruct a minimal DataFrame from the obs column.
+                    obs_col = cfg.get('obs_col')
+                    if obs_col and obs_col in adata_query.obs.columns:
+                        df = pd.DataFrame(
+                            {'best_label': adata_query.obs[obs_col], 'best_score': 1.0},
+                            index=adata_query.obs_names,
+                        )
+                    else:
+                        df = pd.DataFrame(
+                            {'best_label': df.iloc[:, 0], 'best_score': 1.0},
+                            index=df.index,
+                        )
+                df_labels[cfg['report_key']] = df
+        if not df_labels:
+            df_labels = None
+
+    if verbose:
+        _log('Generating HTML report...')
+    generate_mapping_report(
+        adata_ref,
+        adata_query,
+        presence,
         df_labels=df_labels,
         ref_annot_labs=ref_annot_labs,
         vis_rep_query=args.vis_rep_query,

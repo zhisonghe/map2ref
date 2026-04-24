@@ -18,21 +18,30 @@ def cmd_interface():
 if __name__ == '__main__':
     args = cmd_interface()
 
-    import scarches
-    import scanpy as sc
-    from helpers.pipeline import run_mapping
-
     _LABEL_CONFIG = [
-        {'key': 'ROIGroup',         'obs_col': 'pred_Siletti_ROIGroup',         'tsv': 'label_transfer_ROIGroup.tsv',         'report_key': 'ROIGroup'},
-        {'key': 'ROIGroupFine',     'obs_col': 'pred_Siletti_ROIGroupFine',     'tsv': 'label_transfer_ROIGroupFine.tsv',     'report_key': 'ROIGroupFine'},
-        {'key': 'cell_type',        'obs_col': 'pred_Siletti_cell_type',        'tsv': 'label_transfer_cell_type.tsv',        'report_key': 'cell_type'},
-        {'key': 'supercluster_term','obs_col': 'pred_Siletti_supercluster_term','tsv': 'label_transfer_supercluster_term.tsv','report_key': 'supercluster_term'},
+        {'key': 'ROIGroup',          'obs_col': 'pred_Siletti_ROIGroup',          'tsv': 'label_transfer_ROIGroup.tsv',          'report_key': 'ROIGroup'},
+        {'key': 'ROIGroupFine',      'obs_col': 'pred_Siletti_ROIGroupFine',      'tsv': 'label_transfer_ROIGroupFine.tsv',      'report_key': 'ROIGroupFine'},
+        {'key': 'cell_type',         'obs_col': 'pred_Siletti_cell_type',         'tsv': 'label_transfer_cell_type.tsv',         'report_key': 'cell_type'},
+        {'key': 'supercluster_term', 'obs_col': 'pred_Siletti_supercluster_term', 'tsv': 'label_transfer_supercluster_term.tsv', 'report_key': 'supercluster_term'},
     ]
+    _REF_ANNOT_LABS = ['ROIGroup', 'ROIGroupFine', 'cell_type', 'supercluster_term']
 
-    run_mapping(
-        args,
-        load_vae=lambda adata_ref: scarches.models.scPoli.load(args.ref, adata_ref),
-        label_config=_LABEL_CONFIG,
-        ref_annot_labs=['ROIGroup', 'ROIGroupFine', 'cell_type', 'supercluster_term'],
-    )
+    if args.report_only:
+        from helpers.pipeline import run_report_only
+        run_report_only(
+            args,
+            label_config=_LABEL_CONFIG,
+            ref_annot_labs=_REF_ANNOT_LABS,
+        )
+    else:
+        import scarches
+        import scanpy as sc
+        from helpers.pipeline import run_mapping
+
+        run_mapping(
+            args,
+            load_vae=lambda adata_ref: scarches.models.scPoli.load(args.ref, adata_ref),
+            label_config=_LABEL_CONFIG,
+            ref_annot_labs=_REF_ANNOT_LABS,
+        )
 

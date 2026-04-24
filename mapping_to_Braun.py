@@ -59,35 +59,47 @@ def cmd_interface():
 if __name__ == '__main__':
     args = cmd_interface()
 
-    import numpy as np
-    import pandas as pd
-    import scvi
-    from helpers.wknn import transfer_labels
-    from helpers.pipeline import run_mapping
-    from tqdm import tqdm
-
     _LABEL_CONFIG = [
         {'key': 'CellClass',  'obs_col': 'pred_Braun_CellClass',  'tsv': 'label_transfer_class.tsv',  'report_key': 'Class'},
         {'key': 'Subregion',  'obs_col': 'pred_Braun_Subregion',  'tsv': 'label_transfer_region.tsv', 'report_key': 'Region'},
         {'key': 'Neuron_NTT', 'obs_col': 'pred_Braun_Neuron_NTT', 'tsv': 'label_transfer_NTT.tsv',    'report_key': 'NTT'},
     ]
+    _REF_ANNOT_LABS = ['CellClass', 'Subregion', 'Neuron_NTT']
 
-    def _braun_post_hook(adata_ref, adata_query, wknn, output_dir):
-        vec = hierarchical_region_lab_transfer(adata_ref, adata_query, wknn)
-        vec.to_csv(os.path.join(output_dir, 'label_transfer_region_hier.tsv'), sep='\t')
-        adata_query.obs['pred_Braun_Subregion_hier'] = vec.copy()
-        return {'Region_hier': pd.DataFrame(
-            {'best_label': vec, 'best_score': np.repeat(1, len(vec))},
-            index=vec.index,
-        )}
+    if args.report_only:
+        from helpers.pipeline import run_report_only
+        run_report_only(
+            args,
+            label_config=_LABEL_CONFIG,
+            ref_annot_labs=_REF_ANNOT_LABS,
+            extra_label_config=[
+                {'tsv': 'label_transfer_region_hier.tsv', 'obs_col': 'pred_Braun_Subregion_hier', 'report_key': 'Region_hier'},
+            ],
+        )
+    else:
+        import numpy as np
+        import pandas as pd
+        import scvi
+        from helpers.wknn import transfer_labels
+        from helpers.pipeline import run_mapping
+        from tqdm import tqdm
 
-    import scanpy as sc
+        def _braun_post_hook(adata_ref, adata_query, wknn, output_dir):
+            vec = hierarchical_region_lab_transfer(adata_ref, adata_query, wknn)
+            vec.to_csv(os.path.join(output_dir, 'label_transfer_region_hier.tsv'), sep='\t')
+            adata_query.obs['pred_Braun_Subregion_hier'] = vec.copy()
+            return {'Region_hier': pd.DataFrame(
+                {'best_label': vec, 'best_score': np.repeat(1, len(vec))},
+                index=vec.index,
+            )}
 
-    run_mapping(
-        args,
-        load_vae=lambda adata_ref: scvi.model.SCANVI.load(args.ref, adata_ref),
-        label_config=_LABEL_CONFIG,
-        ref_annot_labs=['CellClass', 'Subregion', 'Neuron_NTT'],
-        post_label_hook=_braun_post_hook,
-    )
+        import scanpy as sc
+
+        run_mapping(
+            args,
+            load_vae=lambda adata_ref: scvi.model.SCANVI.load(args.ref, adata_ref),
+            label_config=_LABEL_CONFIG,
+            ref_annot_labs=_REF_ANNOT_LABS,
+            post_label_hook=_braun_post_hook,
+        )
 
