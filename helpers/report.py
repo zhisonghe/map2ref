@@ -293,7 +293,7 @@ def _write_fancy_html(output,
                 .stat-value {{ margin-top: 8px; font-size: 2rem; line-height: 1; }}
                 .gallery {{
                     display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+                    grid-template-columns: 1fr 2fr;
                     gap: 18px;
                 }}
                 .panel {{ padding: 18px; }}
@@ -325,6 +325,7 @@ def _write_fancy_html(output,
                 @media (max-width: 720px) {{
                     .page {{ width: min(100% - 24px, 1280px); }}
                     .hero {{ padding: 22px; border-radius: 22px; }}
+                    .gallery {{ grid-template-columns: 1fr; }}
                 }}
             </style>
         </head>
