@@ -5,7 +5,7 @@ setuptools<=81.0.0
 scvi-tools==1.1.2
 scArches==0.6.1
 scanpy
-anndata<=0.10.8
+anndata
 numpy
 pandas
 scipy
