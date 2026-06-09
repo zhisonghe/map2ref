@@ -5,9 +5,9 @@ setuptools<=81.0.0
 scvi-tools==1.1.2
 scArches==0.6.1
 scanpy
-anndata
+anndata==0.10.8
 numpy
-pandas
+pandas<2.0.0
 scipy
 torch
 pynndescent
