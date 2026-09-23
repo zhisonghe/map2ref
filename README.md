@@ -45,7 +45,8 @@ Pinned versions required by this project are included:
 - `scvi-tools==1.1.2`
 - `scArches==0.6.1`
 - `anndata==0.10.8`
-- `pandas<2.0.0`
+- `pandas>=2.0,<2.2.2`
+- `numpy<2.0`
 - `torch==2.1.2+cu121` (Linux/CUDA dependency set, CUDA 12.1)
 - `cuml-cu12==24.4.*` (Linux/CUDA dependency set, CUDA 12)
 

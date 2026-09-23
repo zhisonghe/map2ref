@@ -10,3 +10,6 @@ __pycache__
 
 # Ignore the test folder
 test
+
+# Ignore ad hoc smoke test script
+smoke_test_pandas2.py

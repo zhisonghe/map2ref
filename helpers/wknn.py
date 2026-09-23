@@ -253,13 +253,16 @@ def transfer_labels(ref_adata,
                     wknn,
                     label_key="celltype"
                    ):
+    dummies = pd.get_dummies(ref_adata.obs[label_key])
     scores = pd.DataFrame(
-        wknn @ pd.get_dummies(ref_adata.obs[label_key]),
-        columns=pd.get_dummies(ref_adata.obs[label_key]).columns,
+        wknn @ dummies,
+        columns=dummies.columns,
         index=query_adata.obs_names,
     )
     scores["best_label"] = scores.idxmax(1)
-    scores["best_score"] = scores.max(1)
+    # Restrict to the label-score columns: pandas>=2.0 no longer silently
+    # drops the non-numeric best_label column added above when reducing.
+    scores["best_score"] = scores[dummies.columns].max(1)
     return scores
 
 def cmd_interface():

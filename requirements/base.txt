@@ -6,8 +6,10 @@ scvi-tools==1.1.2
 scArches==0.6.1
 scanpy
 anndata==0.10.8
-numpy
-pandas<2.0.0
+# pandas<2.2.2 wheels are only ABI-compatible with numpy<2.0
+numpy<2.0
+# Range required to satisfy cuml-cu12/cudf-cu12==24.4.* on linux-cuda
+pandas>=2.0,<2.2.2
 scipy
 torch
 pynndescent
