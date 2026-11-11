@@ -78,11 +78,8 @@ def run_mapping(args, load_vae, label_config, ref_annot_labs, post_label_hook=No
 
     # ---------------------- optional query layer remapping
     if args.query_layer is not None:
-        # detect target slot via duck-typing: SCANVI/SCVI expose adata_manager with setup_args
-        try:
-            used_layer = vae.adata_manager._registry["setup_args"]["layer"]
-        except AttributeError:
-            used_layer = None  # scPoli: always uses .X
+        # SCANVI/SCVI and scpolivi's SCPOLI all record the expression layer in their registry
+        used_layer = vae.adata_manager._registry["setup_args"].get("layer")
         if used_layer is None:
             # model expects .X; only copy if the user pointed at a different layer
             if args.query_layer != 'X':

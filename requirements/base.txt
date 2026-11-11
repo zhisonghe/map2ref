@@ -1,17 +1,19 @@
 # Core runtime dependencies shared across platforms
-# Note: torch is intentionally omitted here and pinned per platform
-# (see macos.txt and linux-cuda.txt)
-setuptools<=81.0.0
-scvi-tools==1.1.2
-scArches==0.6.1
+# Note: torch is pulled in by scvi-tools; the CUDA build is selected in linux-cuda.txt
+scvi-tools>=1.5.2,<1.6
+# scPoli reimplemented on scvi-tools (replaces the scArches scPoli implementation)
+scpolivi @ git+https://github.com/zhisonghe/scpoli_scvi-tools.git
 scanpy
-anndata==0.10.8
-# pandas<2.2.2 wheels are only ABI-compatible with numpy<2.0
-numpy<2.0
-# Range required to satisfy cuml-cu12/cudf-cu12==24.4.* on linux-cuda
-pandas>=2.0,<2.2.2
+anndata
+numpy
+pandas
 scipy
 torch
 pynndescent
 tqdm
 matplotlib
+# Leiden initialisation of unlabeled scPoli prototypes during query training
+igraph
+leidenalg
+# umap-learn 0.6.0 breaks scanpy.tl.umap on more than a few thousand cells
+umap-learn<0.6

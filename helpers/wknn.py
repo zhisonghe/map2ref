@@ -213,7 +213,7 @@ def estimate_presence_score(ref_adata,
     if verbose:
         _log('Calculating presence scores...')
     if split_by and split_by in query_adata.obs.columns:
-        presence_split = [ np.array(wknn[query_adata.obs[split_by] == x,:].sum(axis = 0)).flatten() for x in query_adata.obs[split_by].unique() ]
+        presence_split = [ np.array(wknn[(query_adata.obs[split_by] == x).to_numpy(),:].sum(axis = 0)).flatten() for x in query_adata.obs[split_by].unique() ]
     else:
         presence_split = [ np.array(wknn.sum(axis = 0)).flatten() ]
     
@@ -262,7 +262,7 @@ def transfer_labels(ref_adata,
                    ):
     dummies = pd.get_dummies(ref_adata.obs[label_key])
     scores = pd.DataFrame(
-        wknn @ dummies,
+        wknn @ dummies.to_numpy(dtype=float),
         columns=dummies.columns,
         index=query_adata.obs_names,
     )
