@@ -30,7 +30,7 @@ This repository includes split dependency files under `requirements/`:
 
 - `requirements/base.txt`: shared runtime dependencies
 - `requirements/macos.txt`: macOS dependencies (excludes RAPIDS `cuml`)
-- `requirements/linux-cuda.txt`: Linux/CUDA dependencies (includes RAPIDS `cuml-cu12`)
+- `requirements/linux-cuda.txt`: Linux/CUDA dependencies (includes RAPIDS `cuml-cu13`; needs an NVIDIA driver >= 580 for CUDA 13)
 
 Install into the uv-managed environment in this folder:
 
@@ -48,7 +48,7 @@ Key version requirements:
 - `scpolivi` (installed from https://github.com/zhisonghe/scpoli_scvi-tools)
 - `igraph` and `leidenalg` (Leiden initialisation of unlabeled scPoli prototypes)
 - `umap-learn<0.6` (umap-learn 0.6.0 breaks `scanpy.tl.umap` on larger data)
-- `cuml-cu12` (Linux/CUDA dependency set only; optional, the pipeline falls back to CPU `pynndescent` without it)
+- `cuml-cu13` (Linux/CUDA dependency set only, matching the CUDA 13 build of torch; optional, the pipeline falls back to CPU `pynndescent` without it)
 
 ## Alternative environment managers
 
