@@ -66,8 +66,9 @@ def build_arg_parser(description, default_ref, no_lab_transfer_help):
         '--epochs',
         type=int,
         dest='epochs',
-        default=200,
-        help='Epochs in model training (default: 200)',
+        default=None,
+        help='Epochs in model training (default: 200 for scANVI-based mapping, '
+             '100 for scPoli-based mapping)',
     )
     parser.add_argument(
         '-k', '--k-wknn',

@@ -3,7 +3,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import os
-import sys
 import argparse
 
 import anndata
@@ -112,84 +111,165 @@ def is_lognorm(mat, max_row_num=10000, max_col_num=None):
     votes_for_log = sum([range_suggests_log, min_suggests_log, vm_suggests_log])
     return votes_for_log >= 2
     
-_MIN_VAR_NAME_RATIO = 0.8
+_SCPOLI_DEFAULT_EPOCHS = 100
+_SCVI_DEFAULT_EPOCHS = 200
+
+
+def _is_scvi(vae):
+    """True for scvi-tools SCVI/SCANVI models (SCANVI subclasses neither, so check both)."""
+    return isinstance(vae, (scvi.model.SCANVI, scvi.model.SCVI))
+
+
+def _is_scpoli(vae):
+    """True for scPoli models of the scpolivi package (scvi-tools reimplementation)."""
+    from scpolivi import SCPOLI
+    return isinstance(vae, SCPOLI)
+
+
+def _check_supported(vae):
+    if not (_is_scvi(vae) or _is_scpoli(vae)):
+        raise RuntimeError('This VAE model is not yet supported')
+
+
+def _model_class(vae):
+    if isinstance(vae, scvi.model.SCANVI):
+        return scvi.model.SCANVI
+    if isinstance(vae, scvi.model.SCVI):
+        return scvi.model.SCVI
+    if _is_scpoli(vae):
+        from scpolivi import SCPOLI
+        return SCPOLI
+    raise RuntimeError('This VAE model is not yet supported')
+
+
+def _model_layer(vae):
+    """Layer the model reads expression from (``None`` means ``.X``)."""
+    return vae.adata_manager._registry['setup_args'].get('layer')
+
+
+def load_scpoli_reference(ref_dir, adata_ref):
+    """Load a pretrained scPoli reference model with scpolivi.
+
+    Two on-disk formats are supported:
+
+    * scvi-tools format (``model.pt``), as written by ``SCPOLI.save``;
+    * scArches format (``attr.pkl``, ``model_params.pt``, ``var_names.csv``), as written by
+      scArches ``scPoli.save``. It is converted on the fly with ``SCPOLI.from_scarches``
+      (scArches itself is not needed).
+
+    ``adata_ref`` is registered with the model and reordered/subset in place to the model's
+    genes if necessary.
+    """
+    from scpolivi import SCPOLI
+
+    if os.path.exists(os.path.join(ref_dir, 'model.pt')):
+        return SCPOLI.load(ref_dir, adata_ref)
+
+    if os.path.exists(os.path.join(ref_dir, 'attr.pkl')):
+        var_names = np.atleast_1d(
+            np.genfromtxt(os.path.join(ref_dir, 'var_names.csv'), delimiter=',', dtype=str)
+        )
+        if list(adata_ref.var_names) != list(var_names):
+            missing = pd.Index(var_names).difference(adata_ref.var_names)
+            if len(missing) > 0:
+                raise ValueError(
+                    f'{len(missing)} model genes are missing from the reference AnnData, '
+                    f'e.g. {list(missing[:5])}'
+                )
+            _log('Reordering reference genes to match the scArches model...')
+            adata_ref._inplace_subset_var(pd.Index(var_names))
+        _log('Converting scArches scPoli checkpoint to scpolivi...')
+        return SCPOLI.from_scarches(ref_dir, adata_ref)
+
+    raise FileNotFoundError(
+        f'No scPoli model found in {ref_dir} (expected model.pt or attr.pkl).'
+    )
+
+
+def _set_query_conditions(adata, vae, col_batch):
+    """Copy the query batch column into the model's batch/condition column(s)."""
+    if not col_batch:
+        return
+    if _is_scvi(vae):
+        ref_batch_key = vae.adata_manager._registry['setup_args']['batch_key']
+        if ref_batch_key is not None:
+            adata.obs[ref_batch_key] = adata.obs[col_batch].copy()
+    else:
+        for cond_key in vae.condition_keys_:
+            if cond_key != col_batch:
+                adata.obs[cond_key] = adata.obs[col_batch].copy()
+
+
+def _mask_cell_type_columns(adata, vae):
+    """Set the scPoli model's cell-type columns of the query to the model's unknown label.
+
+    Query cells are mapped as unlabeled, so any query annotation that happens to share a
+    column name with the reference (e.g. ``class``) must not be used. Returns the original
+    columns so that they can be restored with :func:`_restore_columns`.
+    """
+    if not _is_scpoli(vae) or not vae.cell_type_keys_:
+        return {}
+    unknown = vae.unknown_ct_names_[0] if vae.unknown_ct_names_ else np.nan
+    saved = {k: (adata.obs[k].copy() if k in adata.obs else None) for k in vae.cell_type_keys_}
+    for k in vae.cell_type_keys_:
+        adata.obs[k] = pd.Series(unknown, index=adata.obs_names, dtype=object)
+    return saved
+
+
+def _restore_columns(adata, saved):
+    for k, col in saved.items():
+        if col is None:
+            adata.obs.drop(columns=k, inplace=True, errors='ignore')
+        else:
+            adata.obs[k] = col
+
+
+def _warn_shared_conditions(adata, vae):
+    """Warn if query batch names coincide with reference ones (their embedding is reused)."""
+    if not _is_scpoli(vae):
+        return
+    for cond_key, known in vae.conditions_.items():
+        shared = sorted(set(adata.obs[cond_key].astype(str)) & set(map(str, known)))
+        if shared:
+            warnings.warn(
+                f'Query values of "{cond_key}" also exist in the reference model ({shared[:5]}'
+                f'{"..." if len(shared) > 5 else ""}); these query cells reuse the reference '
+                'condition embedding instead of getting a new one. Rename the query batches '
+                'if they are unrelated to the reference samples.',
+                UserWarning,
+                stacklevel=2,
+            )
+            _log(f'WARNING: query batches shared with the reference: {shared}')
 
 
 def _prepare_query_anndata(adata, vae):
-    """Prepare query AnnData in-place for scArches query integration.
+    """Pad missing genes with zeros and reorder them to the reference model (in place).
 
-    For SCANVI/SCVI: delegates to the model class's ``prepare_query_anndata``
-    method, which pads missing genes with zeros, reorders features to match the
-    reference, and calls ``setup_anndata`` so that ``load_query_data`` can be
-    called immediately afterwards.
-
-    For scPoli: mirrors the same gene-level preparation manually (the built-in
-    ``_validate_var_names`` is only invoked when passing a *path* to
-    ``load_query_data``, not a model object) and additionally fills every
-    cell-type obs column with the appropriate unknown label so that query cells
-    are treated as unlabeled.
+    Uses scvi-tools' ``prepare_query_anndata`` for all supported models (scpolivi's SCPOLI
+    inherits it), which also warns when less than 80% of the reference genes are present.
     """
-    if isinstance(vae, scvi.model._scanvi.SCANVI):
-        scvi.model.SCANVI.prepare_query_anndata(adata, vae)
+    _model_class(vae).prepare_query_anndata(adata, vae)
+
+
+def _ensure_csr(adata, vae, name, verbose=True):
+    """Convert the expression matrix the model reads (``.X`` or its layer) to CSR in place.
+
+    Minibatches are rows (cells); slicing rows of a CSC matrix is ~30x slower than of a CSR
+    one and then dominates training and inference time (the GPU mostly waits for data).
+    scvi-tools only warns about this, and map2ref silences warnings.
+    """
+    layer = _model_layer(vae)
+    mat = adata.X if layer is None else adata.layers[layer]
+    if not scipy.sparse.issparse(mat) or mat.format == 'csr':
         return
-    if isinstance(vae, scvi.model._scvi.SCVI):
-        scvi.model.SCVI.prepare_query_anndata(adata, vae)
-        return
-
-    import scarches
-    if not isinstance(vae, scarches.models.scpoli.scPoli):
-        raise RuntimeError('This VAE model is not yet supported')
-
-    # --- 1. Gene subsetting / padding / reordering ---
-    var_names = pd.Index(vae.adata.var_names)
-
-    intersection = adata.var_names.intersection(var_names)
-    if len(intersection) == 0:
-        raise ValueError(
-            'No reference var names found in query data. '
-            'Please check that the gene identifiers match the reference.'
-        )
-    ratio = len(intersection) / len(var_names)
-    if ratio < _MIN_VAR_NAME_RATIO:
-        warnings.warn(
-            f'Query data contains less than {_MIN_VAR_NAME_RATIO:.0%} of '
-            f'reference var names ({ratio:.1%}). '
-            'This may result in poor performance.',
-            UserWarning,
-            stacklevel=2,
-        )
-
-    genes_to_add = var_names.difference(adata.var_names)
-    if len(genes_to_add) > 0:
-        padding_mtx = csr_matrix(np.zeros((adata.n_obs, len(genes_to_add))))
-        adata_padding = anndata.AnnData(
-            X=padding_mtx.copy(),
-            layers={layer: padding_mtx.copy() for layer in adata.layers},
-        )
-        adata_padding.var_names = genes_to_add
-        adata_padding.obs_names = adata.obs_names
-        adata_out = anndata.concat(
-            [adata, adata_padding],
-            axis=1,
-            join='outer',
-            index_unique=None,
-            merge='unique',
-        )
+    if verbose:
+        _log(f'Converting the {name} expression matrix ({"X" if layer is None else layer}) '
+             f'from {mat.format.upper()} to CSR for fast minibatch loading...')
+    mat = csr_matrix(mat)
+    if layer is None:
+        adata.X = mat
     else:
-        adata_out = adata
-
-    # Subset/reorder to exactly the reference var order
-    if not var_names.equals(adata_out.var_names):
-        adata_out._inplace_subset_var(var_names)
-
-    if adata_out is not adata:
-        adata._init_as_actual(adata_out)
-
-    # --- 2. Fill cell-type obs columns with unknown label ---
-    if vae.cell_type_keys_ is not None:
-        unknown_label = vae.unknown_ct_names_[0] if vae.unknown_ct_names_ else 'Unknown'
-        for ct_key in vae.cell_type_keys_:
-            adata.obs[ct_key] = unknown_label
+        adata.layers[layer] = mat
 
 
 def train_scarches(adata,
@@ -197,113 +277,111 @@ def train_scarches(adata,
                    vae,
                    col_batch = None,
                    batch_size = 1024,
-                   epochs = 500,
+                   epochs = None,
                    keep_original_adata = False,
                    skip_scale_check = False,
-                   verbose = True):    
+                   verbose = True):
+    """Map query cells onto a reference model with scArches-style architecture surgery.
+
+    ``epochs=None`` uses the model's default: 200 for SCVI/SCANVI and 100 for scPoli (the
+    scPoli default, as in scArches).
+    """
     if verbose:
         _log('Preparing data and model...')
-    
+
+    _check_supported(vae)
+    model = _model_class(vae)
+
     if keep_original_adata:
         ref_idx = adata.var_names.isin(ref_adata.var_names)
         adata = adata[:, ref_idx]
         adata.varm = dict()
-    
-    if isinstance(vae, scvi.model._scanvi.SCANVI):
-        model = scvi.model.SCANVI
-    elif isinstance(vae, scvi.model._scvi.SCVI):
-        model = scvi.model.SCVI
-    else:
-        import scarches
-        if isinstance(vae, scarches.models.scpoli.scPoli):
-            model = scarches.models.scPoli
-        else:
-            raise RuntimeError('This VAE model is not yet supported')
-    
+
     # Determine if reference is log-normalized
+    used_layer = _model_layer(vae)
     r_x_log = is_lognorm(ref_adata.X)
-    if (isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI)):
-        used_layer = vae.adata_manager._registry["setup_args"]["layer"]
-        if used_layer is None:
-            expected_log = r_x_log
-        else:
-            expected_log = is_lognorm(ref_adata.layers[used_layer])
+    if used_layer is None:
+        expected_log = r_x_log
+    else:
+        expected_log = is_lognorm(ref_adata.layers[used_layer])
+    if verbose:
         _log('Data expected to be in log: ' + str(expected_log))
-        # make X a copy of the expected layer in ref
-        if r_x_log != expected_log:
-            ref_adata.layers['_raw_X'] = ref_adata.X.copy()
-            ref_adata.X = ref_adata.layers[used_layer].copy()
-        
-        # make sure the query data share the same scale as ref
-        if not skip_scale_check:
-            if used_layer and used_layer in adata.layers.keys():
-                q_layer_log = is_lognorm(adata.layers[used_layer])
-                if q_layer_log != expected_log:
-                    raise RuntimeError('The query data and reference data do not have the same expression scale (raw counts vs. log-normalized)')
-                adata.layers['_raw_X'] = adata.X.copy()
-                adata.X = adata.layers[used_layer].copy()
-            else:
-                q_x_log = is_lognorm(adata.X)
-                if q_x_log != expected_log:
-                    raise RuntimeError('The query data and reference data do not have the same expression scale (raw counts vs. log-normalized)')
-                if used_layer:
-                    adata.layers[used_layer] = adata.X.copy()
+    # make X a copy of the expected layer in ref
+    if used_layer is not None and r_x_log != expected_log:
+        ref_adata.layers['_raw_X'] = ref_adata.X.copy()
+        ref_adata.X = ref_adata.layers[used_layer].copy()
+
+    # make sure the query data share the same scale as ref
+    if not skip_scale_check:
+        if used_layer and used_layer in adata.layers.keys():
+            q_layer_log = is_lognorm(adata.layers[used_layer])
+            if q_layer_log != expected_log:
+                raise RuntimeError('The query data and reference data do not have the same expression scale (raw counts vs. log-normalized)')
+            adata.layers['_raw_X'] = adata.X.copy()
+            adata.X = adata.layers[used_layer].copy()
         else:
-            if verbose:
-                _log('Skipping expression scale sanity check as requested')
-            if used_layer and used_layer in adata.layers.keys():
-                adata.layers['_raw_X'] = adata.X.copy()
-                adata.X = adata.layers[used_layer].copy()
-            elif used_layer:
+            q_x_log = is_lognorm(adata.X)
+            if q_x_log != expected_log:
+                raise RuntimeError('The query data and reference data do not have the same expression scale (raw counts vs. log-normalized)')
+            if used_layer:
                 adata.layers[used_layer] = adata.X.copy()
     else:
-        _log('Data expected to be in log: ' + str(r_x_log))
-        if not skip_scale_check:
-            q_x_log = is_lognorm(adata.X)
-            if q_x_log != r_x_log:
-                raise RuntimeError('The query data and reference data do not have the same expression scale (raw counts vs. log-normalized)')
-        else:
-            if verbose:
-                _log('[PROGRESS] Skipping expression scale sanity check as requested')
-    
-    if col_batch:
-        if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
-            ref_batch_key = vae.adata_manager._registry["setup_args"]["batch_key"]
-            adata.obs[ref_batch_key] = adata.obs[col_batch].copy()
-        else:
-            import scarches
-            if isinstance(vae, scarches.models.scpoli.scPoli):
-                # scPoli: condition_keys_ is a list of condition obs columns used during training
-                for cond_key in vae.condition_keys_:
-                    if cond_key != col_batch:
-                        adata.obs[cond_key] = adata.obs[col_batch].copy()
-    
+        if verbose:
+            _log('Skipping expression scale sanity check as requested')
+        if used_layer and used_layer in adata.layers.keys():
+            adata.layers['_raw_X'] = adata.X.copy()
+            adata.X = adata.layers[used_layer].copy()
+        elif used_layer:
+            adata.layers[used_layer] = adata.X.copy()
+
+    _set_query_conditions(adata, vae, col_batch)
     _prepare_query_anndata(adata, vae)
-    if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
-        vae_q = model.load_query_data(adata, vae)
-    else:
-        import scarches
-        if isinstance(vae, scarches.models.scpoli.scPoli):
-            # scPoli's load_query_data defaults labeled_indices=None but uses it as a pandas
-            # index key, crashing with KeyError: None when cell_type_keys_ is set.
-            # Pass labeled_indices=[] to correctly signal that all query cells are unlabeled.
+    _ensure_csr(adata, vae, 'query', verbose=verbose)
+
+    if _is_scpoli(vae):
+        _warn_shared_conditions(adata, vae)
+        # labeled_indices=[]: query labels (if any) are not used; all query cells are unlabeled
+        saved_ct = _mask_cell_type_columns(adata, vae)
+        try:
             vae_q = model.load_query_data(adata, vae, labeled_indices=[])
-        else:
-            raise RuntimeError('This VAE model is not yet supported')
-    
+            n_epochs = _SCPOLI_DEFAULT_EPOCHS if epochs is None else epochs
+            if verbose:
+                _log(f'Fitting model ({n_epochs} epochs)...')
+            vae_q.train(n_epochs=n_epochs, batch_size=batch_size)
+        finally:
+            _restore_columns(adata, saved_ct)
+    else:
+        vae_q = model.load_query_data(adata, vae)
+        n_epochs = _SCVI_DEFAULT_EPOCHS if epochs is None else epochs
+        if verbose:
+            _log(f'Fitting model ({n_epochs} epochs)...')
+        vae_q.train(
+            batch_size=batch_size,
+            max_epochs=n_epochs,
+            plan_kwargs=dict(weight_decay=0.0),
+        )
+
     if verbose:
-        _log('Fitting model...')
-    
-    vae_q.train(
-        batch_size=batch_size,
-        max_epochs=epochs,
-        plan_kwargs=dict(weight_decay=0.0),
-    )
-    
-    if verbose:
-        _log('scARCHES model training is done.')
-    
+        _log('scArches model training is done.')
+
     return vae_q
+
+
+_LATENT_BATCH_SIZE = 4096
+
+
+def _latent(vae, adata):
+    # Inference is per cell (eval mode), so a large minibatch only speeds things up;
+    # scvi-tools' default of 128 is very slow for references with millions of cells.
+    old_bs = scvi.settings.batch_size
+    scvi.settings.batch_size = _LATENT_BATCH_SIZE
+    try:
+        if _is_scpoli(vae):
+            return vae.get_latent(adata, mean=True)
+        return vae.get_latent_representation(adata, batch_size=_LATENT_BATCH_SIZE)
+    finally:
+        scvi.settings.batch_size = old_bs
+
 
 def get_latent_space(adata,
                      vae,
@@ -311,55 +389,43 @@ def get_latent_space(adata,
                      col_batch = None,
                      ref_annot_unknown = True
                     ):
-    obs_q = adata.obs.copy()
-    if ref_adata:
-        obs_ref = ref_adata.obs.copy()
-    
-    if col_batch:
-        if isinstance(vae, scvi.model._scanvi.SCANVI) or isinstance(vae, scvi.model._scvi.SCVI):
-            ref_batch_key = vae.adata_manager._registry["setup_args"]["batch_key"]
-            adata.obs[ref_batch_key] = adata.obs[col_batch].copy()
-        else:
-            import scarches
-            if isinstance(vae, scarches.models.scpoli.scPoli):
-                # scPoli: condition_keys_ is a list of condition obs columns used during training
-                for cond_key in vae.condition_keys_:
-                    if cond_key != col_batch:
-                        adata.obs[cond_key] = adata.obs[col_batch].copy()
-    if isinstance(vae, scvi.model._scanvi.SCANVI):
-        ref_annot_key = vae.adata_manager._registry["setup_args"]["labels_key"]
-        label_unknown = vae.adata_manager._registry["setup_args"]["unlabeled_category"]
-        adata.obs[ref_annot_key] = label_unknown
-        if ref_adata:
-            if ref_annot_unknown:
-                ref_adata.obs[ref_annot_key] = label_unknown
-            else:
-                ref_adata.obs[ref_annot_key] = ref_adata.obs[ref_annot_key].tolist()
-    
-    if ref_adata is None:
-        adata_full = adata
-    else:
-        adata.obs['ref'] = 'query'
-        ref_adata.obs['ref'] = 'ref'
-        adata_full = adata.concatenate(ref_adata)
-        adata_full.obs['batch'] = adata.obs["batch"].tolist() + ref_adata.obs["batch"].tolist()
-    
-    import scarches
-    if isinstance(vae, scarches.models.scpoli.scPoli):
-        lat_rep = vae.get_latent(adata_full, mean=True)
-    else:
-        lat_rep = vae.get_latent_representation(adata_full)
+    """Latent representation of the query (and reference) cells with the query model.
 
-    adata.obs = obs_q
-    if ref_adata:
-        ref_adata.obs = obs_ref
-    
+    Query and reference are embedded separately (the encoders work per cell), which avoids
+    concatenating the - often very large - reference with the query. ``.obs`` of both objects
+    is restored afterwards.
+    """
+    _check_supported(vae)
+    obs_q = adata.obs.copy()
+    if ref_adata is not None:
+        obs_ref = ref_adata.obs.copy()
+
+    try:
+        _set_query_conditions(adata, vae, col_batch)
+        _mask_cell_type_columns(adata, vae)  # undone by restoring obs below
+        if isinstance(vae, scvi.model.SCANVI):
+            ref_annot_key = vae.adata_manager._registry["setup_args"]["labels_key"]
+            label_unknown = vae.adata_manager._registry["setup_args"]["unlabeled_category"]
+            adata.obs[ref_annot_key] = label_unknown
+            if ref_adata is not None:
+                if ref_annot_unknown:
+                    ref_adata.obs[ref_annot_key] = label_unknown
+                else:
+                    ref_adata.obs[ref_annot_key] = ref_adata.obs[ref_annot_key].tolist()
+
+        _ensure_csr(adata, vae, 'query')
+        if ref_adata is not None:
+            _ensure_csr(ref_adata, vae, 'reference')
+        lat_rep_q = _latent(vae, adata)
+        lat_rep_ref = _latent(vae, ref_adata) if ref_adata is not None else None
+    finally:
+        adata.obs = obs_q
+        if ref_adata is not None:
+            ref_adata.obs = obs_ref
+
     if ref_adata is None:
-        return lat_rep
-    else:
-        lat_rep_ref = lat_rep[adata_full.obs['ref'] == 'ref',:]
-        lat_rep_q = lat_rep[adata_full.obs['ref'] == 'query',:]
-        return {'ref' : lat_rep_ref, 'query' : lat_rep_q}
+        return lat_rep_q
+    return {'ref' : lat_rep_ref, 'query' : lat_rep_q}
 
 def cmd_interface():
     parser = argparse.ArgumentParser(description="Run scARCHES training to map query data to the pre-trained autoencoder")
@@ -410,8 +476,8 @@ def cmd_interface():
         "--epochs",
         type=int,
         dest="epochs",
-        default=500,
-        help='Epochs in scARCHES model training (default: 500)'
+        default=None,
+        help='Epochs in scARCHES model training (default: 200 for SCVI/SCANVI, 100 for SCPOLI)'
     )
     parser.add_argument(
         "--batch_size",
@@ -451,8 +517,7 @@ if __name__ == "__main__":
     elif args.model_type.upper() == 'SCVI':
         model = scvi.model.SCVI
     elif args.model_type.upper() == 'SCPOLI':
-        import scarches
-        model = scarches.models.scPoli
+        model = None  # loaded with scpolivi below
     else:
         raise RuntimeError('The VAE model type is not yet supported. Should be one of SCANVI, SCVI and SCPOLI')
     
@@ -460,7 +525,10 @@ if __name__ == "__main__":
     adata = sc.read(args.H5AD)
     ref_adata = sc.read(args.REF_H5AD)
     
-    vae = model.load(args.model, ref_adata)
+    if model is None:
+        vae = load_scpoli_reference(args.model, ref_adata)
+    else:
+        vae = model.load(args.model, ref_adata)
     vae_q = train_scarches(adata, ref_adata, vae = vae, col_batch = args.query_batch_key, batch_size = args.batch_size, epochs = args.epochs, keep_original_adata = False, skip_scale_check = args.skip_scale_check, verbose = True)
     
     _log('Saving model and params...')

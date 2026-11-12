@@ -34,13 +34,12 @@ if __name__ == '__main__':
             ref_annot_labs=_REF_ANNOT_LABS,
         )
     else:
-        import scarches
-        import scanpy as sc
+        from helpers.mapping_scarches import load_scpoli_reference
         from helpers.pipeline import run_mapping
 
         run_mapping(
             args,
-            load_vae=lambda adata_ref: scarches.models.scPoli.load(args.ref, adata_ref),
+            load_vae=lambda adata_ref: load_scpoli_reference(args.ref, adata_ref),
             label_config=_LABEL_CONFIG,
             ref_annot_labs=_REF_ANNOT_LABS,
         )

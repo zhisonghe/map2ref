@@ -1,7 +1,7 @@
 # map2ref: one-liner CLI for scArches and label transfer with human brain cell atlas references
 This is a CLI pipeline to map query scRNA-seq data to a pretrained single-cell brain atlas reference. For each atlas, the pipeline:
 
-1. **Projects the query** into the reference latent space via scArches surgery on the pretrained VAE model (scANVI for Braun, scPoli for Siletti)
+1. **Projects the query** into the reference latent space via scArches-style architecture surgery on the pretrained VAE model (scANVI for Braun, scPoli for Wang and Siletti). scPoli models are run with [scpolivi](https://github.com/zhisonghe/scpoli_scvi-tools), a reimplementation of scPoli in scvi-tools; the original scArches package is no longer needed
 2. **Calculates presence scores** using a weighted k-nearest-neighbour (WKNN) graph, with optional random-walk smoothing, to quantify how well each reference cell is represented in the query
 3. **Transfers labels** from the reference to the query via the WKNN graph; for Braun mapping this includes cell class, subregion, neuron transmitter type (NTT), and a hierarchical region label that resolves each cell to the most specific unambiguous brain region in the developmental hierarchy; for Siletti mapping this includes ROI group, fine ROI group, cell type, and supercluster term
 4. **Generates an HTML report** with UMAP visualisations of the mapping results
@@ -12,22 +12,25 @@ It includes CLI commands for mapping to the transcriptomic cell atlas of the dev
 
 - `mapping_to_Braun.py`: CLI for mapping to the developing human brain atlas (Braun et al. 2023)
 - `mapping_to_Siletti.py`: CLI for mapping to the adult human brain atlas (Siletti et al. 2023)
+- `mapping_to_Wang.py`: CLI for mapping to the developing human cerebral cortex atlas (RNA portion of the scMultiome data; Wang et al. 2025)
 - `helpers/`: helper modules (`mapping_scarches.py`, `wknn.py`, `report.py`, `pipeline.py`, `cli.py`)
 - `models/`: directory for the pretrained reference models (populated after downloading from Zenodo)
 
 ## Dependency installation with uv
 
-This project requires **Python 3.9**. A newer version is not used because Python 3.9 is the highest version compatible with the scArches package. Create a local virtual environment with uv before installing dependencies:
+This project requires **Python 3.10–3.13** (Python 3.12 is recommended). Create a local virtual environment with uv before installing dependencies:
 
 ```bash
-uv venv --python 3.9 .venv
+uv venv --python 3.12 .venv
 ```
+
+> **Earlier versions.** map2ref up to [v0.1.0](https://github.com/zhisonghe/map2ref/releases/tag/v0.1.0) ran scPoli with the original scArches package (Python 3.9, `scvi-tools==1.1.2`, `scArches==0.6.1`). Check out that release if you need the old behaviour.
 
 This repository includes split dependency files under `requirements/`:
 
 - `requirements/base.txt`: shared runtime dependencies
 - `requirements/macos.txt`: macOS dependencies (excludes RAPIDS `cuml`)
-- `requirements/linux-cuda.txt`: Linux/CUDA dependencies (includes `cuml==24.4`)
+- `requirements/linux-cuda.txt`: Linux/CUDA dependencies (includes RAPIDS `cuml-cu13`; needs an NVIDIA driver >= 580 for CUDA 13)
 
 Install into the uv-managed environment in this folder:
 
@@ -39,29 +42,26 @@ uv pip install --python .venv/bin/python -r requirements/macos.txt
 uv pip install --python .venv/bin/python -r requirements/linux-cuda.txt
 ```
 
-Pinned versions required by this project are included:
+Key version requirements:
 
-- `setuptools<=81.0.0`
-- `scvi-tools==1.1.2`
-- `scArches==0.6.1`
-- `anndata==0.10.8`
-- `pandas>=2.0,<2.2.2`
-- `numpy<2.0`
-- `torch==2.1.2+cu121` (Linux/CUDA dependency set, CUDA 12.1)
-- `cuml-cu12==24.4.*` (Linux/CUDA dependency set, CUDA 12)
+- `scvi-tools>=1.5.2,<1.6`
+- `scpolivi` (installed from https://github.com/zhisonghe/scpoli_scvi-tools)
+- `igraph` and `leidenalg` (Leiden initialisation of unlabeled scPoli prototypes)
+- `umap-learn<0.6` (umap-learn 0.6.0 breaks `scanpy.tl.umap` on larger data)
+- `cuml-cu13` (Linux/CUDA dependency set only, matching the CUDA 13 build of torch; optional, the pipeline falls back to CPU `pynndescent` without it)
 
 ## Alternative environment managers
 
-conda/mamba and pixi can also be used to create the Python 3.9 environment before running the `uv pip install` steps above:
+conda/mamba and pixi can also be used to create the Python environment before running the `uv pip install` steps above:
 
 ```bash
 # conda / mamba
-conda create -n map2ref python=3.9
+conda create -n map2ref python=3.12
 conda activate map2ref
 
 # pixi
 pixi init --channel conda-forge
-pixi add python=3.9
+pixi add python=3.12
 ```
 
 ## Usage
@@ -98,18 +98,40 @@ python map2ref/mapping_to_Siletti.py \
     --force-new-umap
 ```
 
+### Mapping to the developing human cerebral cortex atlas (Wang et al. 2025)
+
+```bash
+python map2ref/mapping_to_Wang.py \
+    -q query.h5ad \
+    -o output_map2Wang \
+    --save-full-query \
+    -b batch \
+    --query-layer counts \
+    --force-new-umap
+```
+
+The scPoli models (Wang, Siletti) are trained on raw counts. If `.X` of the query holds log-normalised data, point `--query-layer` to the layer with the raw counts (e.g. `counts`); the expression-scale check otherwise stops the run. Query batch names that also exist in the reference reuse that reference batch's condition embedding (a warning is printed), so give unrelated query samples distinct names.
+
+The scPoli reference models on Zenodo are stored in the scArches format (`attr.pkl`, `model_params.pt`, `var_names.csv`). They are converted to scpolivi automatically when loaded; a model directory saved by scpolivi (`model.pt`) works as well. The query model in `<output>/model` is saved in the scvi-tools/scpolivi format.
+
+### GPU and performance
+
+Model training and latent inference use a CUDA GPU automatically when one is available. With `cuml` installed (Linux/CUDA dependency set), the weighted kNN also runs on the GPU. For scPoli mapping of 104k query cells (100 epochs, batch size 1024), training took 8 min on an RTX 2080 Ti and 48 min on 5 CPU threads.
+
+Sparse expression matrices of the query and the reference are converted to CSR before training and inference, if needed (logged). Minibatches are rows of cells, and slicing rows of a CSC matrix made data loading the bottleneck: the same GPU training took 37 min with CSC input.
+
 ### Arguments
 
 | Argument | Short | Default | Description |
 |---|---|---|---|
 | `--query` | `-q` | — | Path to the query H5AD file (**required**) |
-| `--ref` | `-r` | `models/model_Braun` or `models/model_Siletti` | Path to the reference model directory |
+| `--ref` | `-r` | `models/model_Braun`, `models/model_Siletti` or `models/model_Wang` | Path to the reference model directory |
 | `--output` | `-o` | `output` | Path to the output folder |
 | `--save-full-query` | | off | Save a full-gene query AnnData (alongside the gene-subset `query.h5ad`) with all mapping results |
 | `--query-batch-key` | `-b` | `batch` | Key in `adata.obs` identifying sample/batch for scArches surgery |
 | `--query-layer` | | `None` | Layer in the query AnnData to use as expression input (use `X` to refer to `.X`); by default the layer expected by the pretrained model is used |
 | `--batch-size` | | `1024` | Mini-batch size for model training |
-| `--epochs` | | `200` | Number of training epochs |
+| `--epochs` | | `200` (scANVI) / `100` (scPoli) | Number of training epochs |
 | `--k-wknn` | `-k` | `100` | Number of nearest neighbours per query cell in the reference for WKNN construction |
 | `--k-ref` | `-n` | `100` | Number of nearest neighbours per reference cell in the reference for label propagation |
 | `--no-smooth-presence` | | off | Skip random-walk smoothing of presence scores |
