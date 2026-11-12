@@ -141,3 +141,32 @@ Sparse expression matrices of the query and the reference are converted to CSR b
 | `--report-type` | | `basic` | HTML report style: `basic` or `fancy` |
 | `--skip-scale-check` | | off | Skip the expression-scale sanity check between query and reference |
 | `--quiet` | | off | Suppress progress messages |
+
+## Using other reference models
+
+The mapping helpers support these model types:
+
+| Model | Package | Used by |
+|---|---|---|
+| scANVI, scVI | scvi-tools | Braun |
+| scPoli | [scpolivi](https://github.com/zhisonghe/scpoli_scvi-tools) | Wang, Siletti |
+| scANCVI | [scancvi](https://github.com/zhisonghe/scancvi) (install separately, e.g. `uv pip install --python .venv/bin/python git+https://github.com/zhisonghe/scancvi.git`) | – |
+
+More generally, any scvi-tools model with scArches support (`ArchesMixin`) that is registered with a `batch_key` is handled in the same way as scANVI. If the model has a `labels_key`, query and reference cells are embedded as unlabeled.
+
+To map to a new atlas, put the trained model and its reference AnnData (`ref.h5ad`) into one folder under `models/`. Then copy `mapping_to_Wang.py` and adapt `load_vae` and the label configuration, for example:
+
+```python
+from scancvi import SCANCVI
+
+run_mapping(
+    args,
+    load_vae=lambda adata_ref: SCANCVI.load(args.ref, adata_ref),
+    label_config=[
+        {'key': 'cell_type', 'obs_col': 'pred_cell_type', 'tsv': 'label_transfer_cell_type.tsv', 'report_key': 'cell_type'},
+    ],
+    ref_annot_labs=['cell_type'],
+)
+```
+
+For scANCVI, query surgery trains without the graph Laplacian loss: the graph weight is not saved with the model, and the query has no graph.
