@@ -114,6 +114,12 @@ The scPoli models (Wang, Siletti) are trained on raw counts. If `.X` of the quer
 
 The scPoli reference models on Zenodo are stored in the scArches format (`attr.pkl`, `model_params.pt`, `var_names.csv`). They are converted to scpolivi automatically when loaded; a model directory saved by scpolivi (`model.pt`) works as well. The query model in `<output>/model` is saved in the scvi-tools/scpolivi format.
 
+### GPU and performance
+
+Model training and latent inference use a CUDA GPU automatically when one is available. With `cuml` installed (Linux/CUDA dependency set), the weighted kNN also runs on the GPU. For scPoli mapping of 104k query cells (100 epochs, batch size 1024), training took 8 min on an RTX 2080 Ti and 48 min on 5 CPU threads.
+
+Sparse expression matrices of the query and the reference are converted to CSR before training and inference, if needed (logged). Minibatches are rows of cells, and slicing rows of a CSC matrix made data loading the bottleneck: the same GPU training took 37 min with CSC input.
+
 ### Arguments
 
 | Argument | Short | Default | Description |
