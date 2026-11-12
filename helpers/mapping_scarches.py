@@ -115,14 +115,31 @@ _SCPOLI_DEFAULT_EPOCHS = 100
 _SCVI_DEFAULT_EPOCHS = 200
 
 
+def _setup_args(vae):
+    """Arguments the model's AnnData was registered with (``setup_anndata``)."""
+    return vae.adata_manager._registry['setup_args']
+
+
 def _is_scvi(vae):
-    """True for scvi-tools SCVI/SCANVI models (SCANVI subclasses neither, so check both)."""
-    return isinstance(vae, (scvi.model.SCANVI, scvi.model.SCVI))
+    """True for scvi-tools-style surgery models with a single batch key.
+
+    Covers SCVI and SCANVI as well as models built on the same scvi-tools base classes, such
+    as SCANCVI (scancvi package), which subclasses neither SCVI nor SCANVI.
+    """
+    from scvi.model.base import ArchesMixin
+    return (
+        isinstance(vae, ArchesMixin)
+        and not _is_scpoli(vae)
+        and 'batch_key' in _setup_args(vae)
+    )
 
 
 def _is_scpoli(vae):
     """True for scPoli models of the scpolivi package (scvi-tools reimplementation)."""
-    from scpolivi import SCPOLI
+    try:
+        from scpolivi import SCPOLI
+    except ImportError:
+        return False
     return isinstance(vae, SCPOLI)
 
 
@@ -132,19 +149,14 @@ def _check_supported(vae):
 
 
 def _model_class(vae):
-    if isinstance(vae, scvi.model.SCANVI):
-        return scvi.model.SCANVI
-    if isinstance(vae, scvi.model.SCVI):
-        return scvi.model.SCVI
-    if _is_scpoli(vae):
-        from scpolivi import SCPOLI
-        return SCPOLI
-    raise RuntimeError('This VAE model is not yet supported')
+    """Class whose ``prepare_query_anndata``/``load_query_data`` maps queries onto ``vae``."""
+    _check_supported(vae)
+    return type(vae)
 
 
 def _model_layer(vae):
     """Layer the model reads expression from (``None`` means ``.X``)."""
-    return vae.adata_manager._registry['setup_args'].get('layer')
+    return _setup_args(vae).get('layer')
 
 
 def load_scpoli_reference(ref_dir, adata_ref):
@@ -191,7 +203,7 @@ def _set_query_conditions(adata, vae, col_batch):
     if not col_batch:
         return
     if _is_scvi(vae):
-        ref_batch_key = vae.adata_manager._registry['setup_args']['batch_key']
+        ref_batch_key = _setup_args(vae)['batch_key']
         if ref_batch_key is not None:
             adata.obs[ref_batch_key] = adata.obs[col_batch].copy()
     else:
@@ -403,9 +415,12 @@ def get_latent_space(adata,
     try:
         _set_query_conditions(adata, vae, col_batch)
         _mask_cell_type_columns(adata, vae)  # undone by restoring obs below
-        if isinstance(vae, scvi.model.SCANVI):
-            ref_annot_key = vae.adata_manager._registry["setup_args"]["labels_key"]
-            label_unknown = vae.adata_manager._registry["setup_args"]["unlabeled_category"]
+        setup_args = _setup_args(vae)
+        # Models with a labels key (SCANVI, SCANCVI): embed cells as unlabeled. SCANCVI may be
+        # set up without labels_key; it then generates its own all-unlabeled column.
+        if _is_scvi(vae) and setup_args.get('labels_key') is not None:
+            ref_annot_key = setup_args['labels_key']
+            label_unknown = setup_args['unlabeled_category']
             adata.obs[ref_annot_key] = label_unknown
             if ref_adata is not None:
                 if ref_annot_unknown:
@@ -463,7 +478,7 @@ def cmd_interface():
         type=str,
         dest="model_type",
         default='scanvi',
-        help='Type of the VAE model. Should be one of SCVI, SCANVI, and SCPOLI (default: SCANVI)'
+        help='Type of the VAE model. Should be one of SCVI, SCANVI, SCANCVI and SCPOLI (default: SCANVI)'
     )
     parser.add_argument(
         "--query_batch_key",
@@ -516,10 +531,13 @@ if __name__ == "__main__":
         model = scvi.model.SCANVI
     elif args.model_type.upper() == 'SCVI':
         model = scvi.model.SCVI
+    elif args.model_type.upper() == 'SCANCVI':
+        from scancvi import SCANCVI
+        model = SCANCVI
     elif args.model_type.upper() == 'SCPOLI':
         model = None  # loaded with scpolivi below
     else:
-        raise RuntimeError('The VAE model type is not yet supported. Should be one of SCANVI, SCVI and SCPOLI')
+        raise RuntimeError('The VAE model type is not yet supported. Should be one of SCANVI, SCVI, SCANCVI and SCPOLI')
     
     _log('Reading data...')
     adata = sc.read(args.H5AD)
