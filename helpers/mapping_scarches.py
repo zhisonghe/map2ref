@@ -251,6 +251,27 @@ def _prepare_query_anndata(adata, vae):
     _model_class(vae).prepare_query_anndata(adata, vae)
 
 
+def _ensure_csr(adata, vae, name, verbose=True):
+    """Convert the expression matrix the model reads (``.X`` or its layer) to CSR in place.
+
+    Minibatches are rows (cells); slicing rows of a CSC matrix is ~30x slower than of a CSR
+    one and then dominates training and inference time (the GPU mostly waits for data).
+    scvi-tools only warns about this, and map2ref silences warnings.
+    """
+    layer = _model_layer(vae)
+    mat = adata.X if layer is None else adata.layers[layer]
+    if not scipy.sparse.issparse(mat) or mat.format == 'csr':
+        return
+    if verbose:
+        _log(f'Converting the {name} expression matrix ({"X" if layer is None else layer}) '
+             f'from {mat.format.upper()} to CSR for fast minibatch loading...')
+    mat = csr_matrix(mat)
+    if layer is None:
+        adata.X = mat
+    else:
+        adata.layers[layer] = mat
+
+
 def train_scarches(adata,
                    ref_adata,
                    vae,
@@ -315,6 +336,7 @@ def train_scarches(adata,
 
     _set_query_conditions(adata, vae, col_batch)
     _prepare_query_anndata(adata, vae)
+    _ensure_csr(adata, vae, 'query', verbose=verbose)
 
     if _is_scpoli(vae):
         _warn_shared_conditions(adata, vae)
@@ -391,6 +413,9 @@ def get_latent_space(adata,
                 else:
                     ref_adata.obs[ref_annot_key] = ref_adata.obs[ref_annot_key].tolist()
 
+        _ensure_csr(adata, vae, 'query')
+        if ref_adata is not None:
+            _ensure_csr(ref_adata, vae, 'reference')
         lat_rep_q = _latent(vae, adata)
         lat_rep_ref = _latent(vae, ref_adata) if ref_adata is not None else None
     finally:
